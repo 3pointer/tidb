@@ -24,6 +24,7 @@ import (
 	"github.com/cznic/mathutil"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/parser/model"
 	"github.com/pingcap/parser/mysql"
 	"github.com/pingcap/tidb/kv"
@@ -629,6 +630,12 @@ func getPhysicalTableRegions(physicalTableID int64, tableInfo *model.TableInfo, 
 	}
 	// for record
 	startKey, endKey := tablecodec.GetTableHandleKeyRange(physicalTableID)
+	log.Info("[getPhysicalTableRegions] startKey endKey",
+		zap.Binary("start", startKey),
+		zap.Binary("end", endKey),
+		zap.Int64("tableID", physicalTableID),
+		zap.String("name", tableInfo.Name.String()),
+	)
 	regionCache := tikvStore.GetRegionCache()
 	recordRegionMetas, err := regionCache.LoadRegionsInKeyRange(tikv.NewBackofferWithVars(context.Background(), 20000, nil), startKey, endKey)
 	if err != nil {

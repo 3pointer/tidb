@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/util"
@@ -1019,6 +1020,8 @@ func (c *RegionCache) scanRegions(bo *Backoffer, startKey, endKey []byte, limit 
 			}
 		}
 		regionsInfo, err := c.pdClient.ScanRegions(bo.ctx, startKey, endKey, limit)
+		log.Info("[scanRegions]", zap.Any("regions", regionsInfo),
+			zap.Int("limit", limit), zap.Error(err))
 		if err != nil {
 			tikvRegionCacheCounterWithScanRegionsError.Inc()
 			backoffErr = errors.Errorf(
