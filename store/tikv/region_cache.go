@@ -720,6 +720,10 @@ func (c *RegionCache) ListRegionIDsInKeyRange(bo *Backoffer, startKey, endKey []
 
 // LoadRegionsInKeyRange lists regions in [start_key,end_key].
 func (c *RegionCache) LoadRegionsInKeyRange(bo *Backoffer, startKey, endKey []byte) (regions []*Region, err error) {
+	log.Info("[LoadRegionsInKeyRange]",
+		zap.Binary("start", startKey),
+		zap.Binary("end", endKey),
+	)
 	var batchRegions []*Region
 	for {
 		batchRegions, err = c.BatchLoadRegionsWithKeyRange(bo, startKey, endKey, defaultRegionsPerBatch)
@@ -730,6 +734,7 @@ func (c *RegionCache) LoadRegionsInKeyRange(bo *Backoffer, startKey, endKey []by
 			// should never happen
 			break
 		}
+		log.Info("[LoadRegionsInKeyRange]", zap.Int("len", len(batchRegions)))
 		regions = append(regions, batchRegions...)
 		endRegion := batchRegions[len(batchRegions)-1]
 		if endRegion.Contains(endKey) {
@@ -743,6 +748,7 @@ func (c *RegionCache) LoadRegionsInKeyRange(bo *Backoffer, startKey, endKey []by
 // BatchLoadRegionsWithKeyRange loads at most given numbers of regions to the RegionCache,
 // within the given key range from the startKey to endKey. Returns the loaded regions.
 func (c *RegionCache) BatchLoadRegionsWithKeyRange(bo *Backoffer, startKey []byte, endKey []byte, count int) (regions []*Region, err error) {
+	log.Info("[BatchLoadRegionsWithKeyRange]")
 	regions, err = c.scanRegions(bo, startKey, endKey, count)
 	if err != nil {
 		return
@@ -1007,6 +1013,11 @@ func (c *RegionCache) loadRegionByID(bo *Backoffer, regionID uint64) (*Region, e
 // scanRegions scans at most `limit` regions from PD, starts from the region containing `startKey` and in key order.
 // Regions with no leader will not be returned.
 func (c *RegionCache) scanRegions(bo *Backoffer, startKey, endKey []byte, limit int) ([]*Region, error) {
+	log.Info("[scanRegions] in",
+		zap.Binary("start", startKey),
+		zap.Binary("end", endKey),
+		zap.Int("limit", limit),
+	)
 	if limit == 0 {
 		return nil, nil
 	}
@@ -1036,6 +1047,7 @@ func (c *RegionCache) scanRegions(bo *Backoffer, startKey, endKey []byte, limit 
 
 		if len(regionsInfo) == 0 {
 			return nil, errors.New("PD returned no region")
+
 		}
 		regions := make([]*Region, 0, len(regionsInfo))
 		for _, r := range regionsInfo {
