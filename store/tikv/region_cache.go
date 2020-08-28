@@ -1032,7 +1032,7 @@ func (c *RegionCache) scanRegions(bo *Backoffer, startKey, endKey []byte, limit 
 		}
 		regionsInfo, err := c.pdClient.ScanRegions(bo.ctx, startKey, endKey, limit)
 		log.Info("[scanRegions]", zap.Any("regions", regionsInfo),
-			zap.Int("limit", limit), zap.Error(err))
+			zap.Int("limit", limit), zap.Int("len", len(regionsInfo)), zap.Error(err))
 		if err != nil {
 			tikvRegionCacheCounterWithScanRegionsError.Inc()
 			backoffErr = errors.Errorf(
