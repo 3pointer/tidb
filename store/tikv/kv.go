@@ -395,6 +395,11 @@ func (s *tikvStore) SupportDeleteRange() (supported bool) {
 }
 
 func (s *tikvStore) SendReq(bo *Backoffer, req *tikvrpc.Request, regionID RegionVerID, timeout time.Duration) (*tikvrpc.Response, error) {
+	if span := opentracing.SpanFromContext(bo.ctx); span != nil && span.Tracer() != nil {
+		span1 := span.Tracer().StartSpan("tikvStore.SendReq", opentracing.ChildOf(span.Context()))
+		defer span1.Finish()
+		bo.ctx = opentracing.ContextWithSpan(bo.ctx, span1)
+	}
 	sender := NewRegionRequestSender(s.regionCache, s.client)
 	return sender.SendReq(bo, req, regionID, timeout)
 }

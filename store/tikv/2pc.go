@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/hex"
 	"math"
+	"math/rand"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -705,6 +706,16 @@ func (c *twoPhaseCommitter) buildPrewriteRequest(batch batchMutations, txnSize u
 	return tikvrpc.NewRequest(tikvrpc.CmdPrewrite, req, pb.Context{Priority: c.priority, SyncLog: c.syncLog})
 }
 
+var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+func RandStringRunes(n int) string {
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letterRunes[rand.Intn(len(letterRunes))]
+	}
+	return string(b)
+}
+
 func (actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, batch batchMutations) error {
 	if span := opentracing.SpanFromContext(bo.ctx); span != nil && span.Tracer() != nil {
 		span1 := span.Tracer().StartSpan("actionPrewrite.handleSingleBatch", opentracing.ChildOf(span.Context()))
@@ -720,6 +731,9 @@ func (actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, bat
 	}
 
 	req := c.buildPrewriteRequest(batch, txnSize)
+
+	uuid := RandStringRunes(10)
+
 	for {
 		resp, err := c.store.SendReq(bo, req, batch.region, readTimeoutShort)
 		if err != nil {
@@ -729,6 +743,7 @@ func (actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, bat
 		if err != nil {
 			return errors.Trace(err)
 		}
+		logutil.BgLogger().Error("region error", zap.String("uuid", uuid), zap.Any("e", regionErr))
 		if regionErr != nil {
 			err = bo.Backoff(BoRegionMiss, errors.New(regionErr.String()))
 			if err != nil {
@@ -742,6 +757,7 @@ func (actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, bat
 		}
 		prewriteResp := resp.Resp.(*pb.PrewriteResponse)
 		keyErrs := prewriteResp.GetErrors()
+		logutil.BgLogger().Error("key error", zap.String("uuid", uuid), zap.Any("e", keyErrs))
 		if len(keyErrs) == 0 {
 			if bytes.Equal(c.primary(), batch.mutations.keys[0]) {
 				// After writing the primary key, if the size of the transaction is large than 32M,
@@ -781,6 +797,7 @@ func (actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, bat
 		}
 		atomic.AddInt64(&c.getDetail().ResolveLockTime, int64(time.Since(start)))
 		if msBeforeExpired > 0 {
+			logutil.BgLogger().Error("key error", zap.String("uuid", uuid), zap.Any("e", msBeforeExpired))
 			err = bo.BackoffWithMaxSleep(BoTxnLock, int(msBeforeExpired), errors.Errorf("2PC prewrite lockedKeys: %d", len(locks)))
 			if err != nil {
 				return errors.Trace(err)
