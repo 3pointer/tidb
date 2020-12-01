@@ -438,6 +438,11 @@ var preSplitSizeThreshold uint32 = 32 << 20
 // it does action on primary batch first, then on secondary batches. If action is commit, secondary batches
 // is done in background goroutine.
 func (c *twoPhaseCommitter) doActionOnMutations(bo *Backoffer, action twoPhaseCommitAction, mutations committerMutations) error {
+	if span := opentracing.SpanFromContext(bo.ctx); span != nil && span.Tracer() != nil {
+		span1 := span.Tracer().StartSpan("twoPhaseCommitter.doActionOnMutations", opentracing.ChildOf(span.Context()))
+		defer span1.Finish()
+		bo.ctx = opentracing.ContextWithSpan(bo.ctx, span1)
+	}
 	if mutations.len() == 0 {
 		return nil
 	}
@@ -514,6 +519,11 @@ func preSplitAndScatterIn2PC(ctx context.Context, store *tikvStore, group groupe
 }
 
 func (c *twoPhaseCommitter) doActionOnGroupMutations(bo *Backoffer, action twoPhaseCommitAction, groups []groupedMutations) error {
+	if span := opentracing.SpanFromContext(bo.ctx); span != nil && span.Tracer() != nil {
+		span1 := span.Tracer().StartSpan("twoPhaseCommitter.doActionOnGroupMutations", opentracing.ChildOf(span.Context()))
+		defer span1.Finish()
+		bo.ctx = opentracing.ContextWithSpan(bo.ctx, span1)
+	}
 	action.tiKVTxnRegionsNumHistogram().Observe(float64(len(groups)))
 
 	var batches []batchMutations
@@ -607,6 +617,12 @@ func (c *twoPhaseCommitter) doActionOnGroupMutations(bo *Backoffer, action twoPh
 
 // doActionOnBatches does action to batches in parallel.
 func (c *twoPhaseCommitter) doActionOnBatches(bo *Backoffer, action twoPhaseCommitAction, batches []batchMutations) error {
+	if span := opentracing.SpanFromContext(bo.ctx); span != nil && span.Tracer() != nil {
+		span1 := span.Tracer().StartSpan("twoPhaseCommitter.doActionOnBatches", opentracing.ChildOf(span.Context()))
+		defer span1.Finish()
+		bo.ctx = opentracing.ContextWithSpan(bo.ctx, span1)
+	}
+	logutil.BgLogger().Info("batches", zap.Any("b", batches))
 	if len(batches) == 0 {
 		return nil
 	}
@@ -690,6 +706,12 @@ func (c *twoPhaseCommitter) buildPrewriteRequest(batch batchMutations, txnSize u
 }
 
 func (actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, batch batchMutations) error {
+	if span := opentracing.SpanFromContext(bo.ctx); span != nil && span.Tracer() != nil {
+		span1 := span.Tracer().StartSpan("actionPrewrite.handleSingleBatch", opentracing.ChildOf(span.Context()))
+		defer span1.Finish()
+		bo.ctx = opentracing.ContextWithSpan(bo.ctx, span1)
+	}
+
 	txnSize := uint64(c.regionTxnSize[batch.region.id])
 	// When we retry because of a region miss, we don't know the transaction size. We set the transaction size here
 	// to MaxUint64 to avoid unexpected "resolve lock lite".
@@ -1560,6 +1582,11 @@ func (batchExe *batchExecutor) startWorker(exitCh chan struct{}, ch chan error, 
 
 // process will start worker routine and collect results
 func (batchExe *batchExecutor) process(batches []batchMutations) error {
+	if span := opentracing.SpanFromContext(batchExe.backoffer.ctx); span != nil && span.Tracer() != nil {
+		span1 := span.Tracer().StartSpan("batchExe.process", opentracing.ChildOf(span.Context()))
+		defer span1.Finish()
+		batchExe.backoffer.ctx = opentracing.ContextWithSpan(batchExe.backoffer.ctx, span1)
+	}
 	var err error
 	err = batchExe.initUtils()
 	if err != nil {
