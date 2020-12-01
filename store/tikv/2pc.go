@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"math"
 	"math/rand"
 	"sort"
@@ -717,8 +718,9 @@ func RandStringRunes(n int) string {
 }
 
 func (actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, batch batchMutations) error {
+	uuid := RandStringRunes(10)
 	if span := opentracing.SpanFromContext(bo.ctx); span != nil && span.Tracer() != nil {
-		span1 := span.Tracer().StartSpan("actionPrewrite.handleSingleBatch", opentracing.ChildOf(span.Context()))
+		span1 := span.Tracer().StartSpan(fmt.Sprintf("actionPrewrite.handleSingleBatch.%s", uuid), opentracing.ChildOf(span.Context()))
 		defer span1.Finish()
 		bo.ctx = opentracing.ContextWithSpan(bo.ctx, span1)
 	}
@@ -731,8 +733,6 @@ func (actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, bat
 	}
 
 	req := c.buildPrewriteRequest(batch, txnSize)
-
-	uuid := RandStringRunes(10)
 
 	for {
 		resp, err := c.store.SendReq(bo, req, batch.region, readTimeoutShort)
