@@ -797,11 +797,12 @@ func (actionPrewrite) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, bat
 		}
 		atomic.AddInt64(&c.getDetail().ResolveLockTime, int64(time.Since(start)))
 		if msBeforeExpired > 0 {
-			logutil.BgLogger().Error("key error", zap.String("uuid", uuid), zap.Any("e", msBeforeExpired))
+			logutil.BgLogger().Error("msbefore expired", zap.String("uuid", uuid), zap.Any("e", msBeforeExpired), zap.Int64("t", int64(time.Since(start))))
 			err = bo.BackoffWithMaxSleep(BoTxnLock, int(msBeforeExpired), errors.Errorf("2PC prewrite lockedKeys: %d", len(locks)))
 			if err != nil {
 				return errors.Trace(err)
 			}
+			logutil.BgLogger().Error("after backoff", zap.String("uuid", uuid), zap.Any("e", msBeforeExpired), zap.Int64("t", int64(time.Since(start))))
 		}
 	}
 }
