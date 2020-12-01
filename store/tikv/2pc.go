@@ -879,6 +879,11 @@ func (tm *ttlManager) keepAlive(c *twoPhaseCommitter) {
 }
 
 func (action actionPessimisticLock) handleSingleBatch(c *twoPhaseCommitter, bo *Backoffer, batch batchMutations) error {
+	if span := opentracing.SpanFromContext(bo.ctx); span != nil && span.Tracer() != nil {
+		span1 := span.Tracer().StartSpan("actionPessimisticLock.handleSingleBatch", opentracing.ChildOf(span.Context()))
+		defer span1.Finish()
+		bo.ctx = opentracing.ContextWithSpan(bo.ctx, span1)
+	}
 	m := &batch.mutations
 	mutations := make([]*pb.Mutation, m.len())
 	for i := range m.keys {
