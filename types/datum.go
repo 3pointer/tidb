@@ -16,6 +16,7 @@ package types
 import (
 	"fmt"
 	"math"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -1392,6 +1393,7 @@ func (d *Datum) convertToMysqlJSON(sc *stmtctx.StatementContext, target *FieldTy
 	switch d.k {
 	case KindString, KindBytes:
 		var j json.BinaryJSON
+		debug.PrintStack()
 		if j, err = json.ParseBinaryFromString(d.GetString()); err == nil {
 			ret.SetMysqlJSON(j)
 		}
