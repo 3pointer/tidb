@@ -9,7 +9,7 @@ package mockstorage
 import (
 	context "context"
 	gomock "github.com/golang/mock/gomock"
-	storage "github.com/pingcap/br/pkg/storage"
+	storage "github.com/pingcap/tidb/br/pkg/storage"
 	reflect "reflect"
 )
 

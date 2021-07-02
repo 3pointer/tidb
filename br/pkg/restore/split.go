@@ -18,9 +18,9 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"go.uber.org/zap"
 
-	berrors "github.com/pingcap/br/pkg/errors"
-	"github.com/pingcap/br/pkg/logutil"
-	"github.com/pingcap/br/pkg/rtree"
+	berrors "github.com/pingcap/tidb/br/pkg/errors"
+	"github.com/pingcap/tidb/br/pkg/logutil"
+	"github.com/pingcap/tidb/br/pkg/rtree"
 )
 
 // Constants for split retry machinery.

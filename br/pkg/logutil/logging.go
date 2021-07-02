@@ -16,7 +16,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/pingcap/br/pkg/redact"
+	"github.com/pingcap/tidb/br/pkg/redact"
 )
 
 // AbbreviatedArrayMarshaler abbreviates an array of elements.

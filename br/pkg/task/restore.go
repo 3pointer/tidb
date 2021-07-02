@@ -6,9 +6,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/pingcap/br/pkg/metautil"
+	"github.com/pingcap/tidb/br/pkg/metautil"
 
-	"github.com/pingcap/br/pkg/version"
+	"github.com/pingcap/tidb/br/pkg/version"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
@@ -20,14 +20,14 @@ import (
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/br/pkg/conn"
-	berrors "github.com/pingcap/br/pkg/errors"
-	"github.com/pingcap/br/pkg/glue"
-	"github.com/pingcap/br/pkg/pdutil"
-	"github.com/pingcap/br/pkg/restore"
-	"github.com/pingcap/br/pkg/storage"
-	"github.com/pingcap/br/pkg/summary"
-	"github.com/pingcap/br/pkg/utils"
+	"github.com/pingcap/tidb/br/pkg/conn"
+	berrors "github.com/pingcap/tidb/br/pkg/errors"
+	"github.com/pingcap/tidb/br/pkg/glue"
+	"github.com/pingcap/tidb/br/pkg/pdutil"
+	"github.com/pingcap/tidb/br/pkg/restore"
+	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tidb/br/pkg/summary"
+	"github.com/pingcap/tidb/br/pkg/utils"
 )
 
 const (
