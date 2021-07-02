@@ -16,10 +16,10 @@ import (
 	"github.com/pingcap/tidb/util/testkit"
 	"github.com/pingcap/tidb/util/testleak"
 
-	"github.com/pingcap/br/pkg/backup"
-	"github.com/pingcap/br/pkg/metautil"
-	"github.com/pingcap/br/pkg/mock"
-	"github.com/pingcap/br/pkg/storage"
+	"github.com/pingcap/tidb/br/pkg/backup"
+	"github.com/pingcap/tidb/br/pkg/metautil"
+	"github.com/pingcap/tidb/br/pkg/mock"
+	"github.com/pingcap/tidb/br/pkg/storage"
 )
 
 var _ = Suite(&testBackupSchemaSuite{})

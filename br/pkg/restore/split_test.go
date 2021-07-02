@@ -16,8 +16,8 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 
-	"github.com/pingcap/br/pkg/restore"
-	"github.com/pingcap/br/pkg/rtree"
+	"github.com/pingcap/tidb/br/pkg/restore"
+	"github.com/pingcap/tidb/br/pkg/rtree"
 )
 
 type TestClient struct {

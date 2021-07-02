@@ -21,10 +21,10 @@ import (
 	"github.com/tikv/client-go/v2/tikv"
 	pd "github.com/tikv/pd/client"
 
-	"github.com/pingcap/br/pkg/backup"
-	"github.com/pingcap/br/pkg/conn"
-	"github.com/pingcap/br/pkg/pdutil"
-	"github.com/pingcap/br/pkg/storage"
+	"github.com/pingcap/tidb/br/pkg/backup"
+	"github.com/pingcap/tidb/br/pkg/conn"
+	"github.com/pingcap/tidb/br/pkg/pdutil"
+	"github.com/pingcap/tidb/br/pkg/storage"
 )
 
 type testBackup struct {

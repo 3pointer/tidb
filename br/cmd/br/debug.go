@@ -11,7 +11,7 @@ import (
 	"path"
 	"reflect"
 
-	"github.com/pingcap/br/pkg/metautil"
+	"github.com/pingcap/tidb/br/pkg/metautil"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
@@ -22,14 +22,14 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	berrors "github.com/pingcap/br/pkg/errors"
-	"github.com/pingcap/br/pkg/logutil"
-	"github.com/pingcap/br/pkg/mock/mockid"
-	"github.com/pingcap/br/pkg/restore"
-	"github.com/pingcap/br/pkg/rtree"
-	"github.com/pingcap/br/pkg/task"
-	"github.com/pingcap/br/pkg/utils"
-	"github.com/pingcap/br/pkg/version/build"
+	berrors "github.com/pingcap/tidb/br/pkg/errors"
+	"github.com/pingcap/tidb/br/pkg/logutil"
+	"github.com/pingcap/tidb/br/pkg/mock/mockid"
+	"github.com/pingcap/tidb/br/pkg/restore"
+	"github.com/pingcap/tidb/br/pkg/rtree"
+	"github.com/pingcap/tidb/br/pkg/task"
+	"github.com/pingcap/tidb/br/pkg/utils"
+	"github.com/pingcap/tidb/br/pkg/version/build"
 )
 
 // NewDebugCommand return a debug subcommand.
