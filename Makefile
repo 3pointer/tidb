@@ -13,7 +13,7 @@
 
 include Makefile.common
 
-.PHONY: all clean test gotest server dev benchkv benchraw check checklist parser tidy ddltest
+.PHONY: all clean test gotest server dev benchkv benchraw check checklist parser tidy ddltest web
 
 default: server buildsucc
 
@@ -104,13 +104,63 @@ testSuite:
 clean: failpoint-disable
 	$(GO) clean -i ./...
 
+build_tools: build_br build_lightning build_lightning-ctl
+
+br_web:
+	@cd br/web && npm install && npm run build
+
+build_br:
+	$(GOBUILD) $(RACEFLAG) -o $(BR_BIN) br/cmd/br/*.go
+
+build_lightning_for_web:
+	$(GOBUILD) $(RACEFLAG) -tags dev -o $(LIGHTNING_BIN) br/cmd/tidb-lightning/main.go
+
+build_lightning:
+	$(GOBUILD) $(RACEFLAG) -o $(LIGHTNING_BIN) br/cmd/tidb-lightning/main.go
+
+build_lightning-ctl:
+	$(GOBUILD) $(RACEFLAG) -o $(LIGHTNING_CTL_BIN) br/cmd/tidb-lightning-ctl/main.go
+
+build_for_br_integration_test:
+	@make failpoint-enable
+	($(GOTEST) -c -cover -covermode=count \
+		-coverpkg=$(BR_PKG)/... \
+		-o $(BR_BIN).test \
+		github.com/pingcap/br/cmd/br && \
+	$(GOTEST) -c -cover -covermode=count \
+		-coverpkg=$(BR_PKG)/... \
+		-o $(LIGHTNING_BIN).test \
+		github.com/pingcap/br/cmd/tidb-lightning && \
+	$(GOTEST) -c -cover -covermode=count \
+		-coverpkg=$(BR_PKG)/... \
+		-o $(LIGHTNING_CTL_BIN).test \
+		github.com/pingcap/br/cmd/tidb-lightning-ctl && \
+	$(GOBUILD) $(RACEFLAG) -o bin/locker br/tests/br_key_locked/*.go && \
+	$(GOBUILD) $(RACEFLAG) -o bin/gc br/tests/br_z_gc_safepoint/*.go && \
+	$(GOBUILD) $(RACEFLAG) -o bin/oauth br/tests/br_gcs/*.go && \
+	$(GOBUILD) $(RACEFLAG) -o bin/rawkv br/tests/br_rawkv/*.go && \
+	$(GOBUILD) $(RACEFLAG) -o bin/parquet_gen br/tests/lightning_checkpoint_parquet/*.go \
+	) || (make failpoint-disable && exit 1)
+	@make failpoint-disable
+
 # Split tests for CI to run `make test` in parallel.
-test: test_part_1 test_part_2
+test: test_part_1 test_part_2 test_part_br
 	@>&2 echo "Great, all tests passed."
 
 test_part_1: checklist explaintest
 
 test_part_2: gotest gogenerate
+
+test_part_br: br_unit_test br_integration_test
+
+br_integration_test: br_bins br_build br_build_for_integration_test
+	@cd br && tests/run.sh
+
+br_compatibility_test_prepare:
+	@cd br && tests/run_compatible.sh prepare
+
+br_compatibility_test:
+	@cd br && tests/run_compatible.sh run
 
 explaintest: server_check
 	@cd cmd/explaintest && ./run-tests.sh -s ../../bin/tidb-server
@@ -269,3 +319,35 @@ endif
 bench-daily:
 	cd ./session && \
 	go test -run TestBenchDaily --date `git log -n1 --date=unix --pretty=format:%cd` --commit `git log -n1 --pretty=format:%h` --outfile $(TO)
+
+# There is no FreeBSD environment for GitHub actions. So cross-compile on Linux
+# but that doesn't work with CGO_ENABLED=1, so disable cgo. The reason to have
+# cgo enabled on regular builds is performance.
+ifeq ("$(GOOS)", "freebsd")
+        GOBUILD  = CGO_ENABLED=0 GO111MODULE=on go build -trimpath -ldflags '$(LDFLAGS)'
+endif
+
+br_coverage:
+	tools/bin/gocovmerge "$(TEST_DIR)"/cov.* | grep -vE ".*.pb.go|.*__failpoint_binding__.go" > "$(TEST_DIR)/all_cov.out"
+ifeq ("$(JenkinsCI)", "1")
+        tools/bin/goveralls -coverprofile=$(TEST_DIR)/all_cov.out -service=jenkins-ci -repotoken $(COVERALLS_TOKEN)
+else
+	go tool cover -html "$(TEST_DIR)/all_cov.out" -o "$(TEST_DIR)/all_cov.html"
+	grep -F '<option' "$(TEST_DIR)/all_cov.html"
+endif
+
+# TODO: adjust bins when br integraion tests reformat.
+br_bins:
+	@which bin/tidb-server
+	@which bin/tikv-server
+	@which bin/pd-server
+	@which bin/pd-ctl
+	@which bin/go-ycsb
+	@which bin/minio
+	@which bin/tiflash
+	@which bin/libtiflash_proxy.so
+	@which bin/cdc
+	@which bin/fake-gcs-server
+	@which bin/tikv-importer
+	if [ ! -d bin/flash_cluster_manager ]; then echo "flash_cluster_manager not exist"; exit 1; fi
+

@@ -78,3 +78,11 @@ CHECK_FLAG =
 ifeq ("$(WITH_CHECK)", "1")
 	CHECK_FLAG = $(TEST_LDFLAGS)
 endif
+
+LIGHTNING_BIN     := bin/tidb-lightning
+LIGHTNING_CTL_BIN := bin/tidb-lightning-ctl
+BR_BIN            := bin/br
+VFSGENDEV_BIN     := tools/bin/vfsgendev
+TEST_DIR          := /tmp/backup_restore_test
+
+

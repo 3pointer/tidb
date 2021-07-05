@@ -6,10 +6,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/pingcap/tidb/br/pkg/metautil"
-
-	"github.com/pingcap/tidb/br/pkg/version"
-
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -28,6 +24,8 @@ import (
 	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tidb/br/pkg/summary"
 	"github.com/pingcap/tidb/br/pkg/utils"
+	"github.com/pingcap/tidb/br/pkg/metautil"
+	"github.com/pingcap/tidb/br/pkg/version"
 )
 
 const (
