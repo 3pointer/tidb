@@ -100,3 +100,5 @@ replace cloud.google.com/go/storage => github.com/3pointer/google-cloud-go/stora
 replace github.com/tikv/pd => github.com/tikv/pd v1.1.0-beta.0.20210609101029-3ba158cf41a4
 
 replace google.golang.org/grpc => google.golang.org/grpc v1.27.1
+
+replace github.com/pingcap/kvproto => github.com/3pointer/kvproto v0.0.0-20210705083155-dd85fc377bc7
