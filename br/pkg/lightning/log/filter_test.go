@@ -32,7 +32,7 @@ func (s *testFilterSuite) TestFilter(c *C) {
 	c.Assert(buffer.Stripped(), HasLen, 0)
 
 	logger, buffer = log.MakeTestLogger(zap.WrapCore(func(c zapcore.Core) zapcore.Core {
-		return log.NewFilterCore(c, "github.com/pingcap/tidb/").With([]zap.Field{zap.String("a", "b")})
+		return log.NewFilterCore(c, "github.com/pingcap/br/").With([]zap.Field{zap.String("a", "b")})
 	}), zap.AddCaller())
 	logger.Warn("the message", zap.Int("number", 123456), zap.Ints("array", []int{7, 8, 9}))
 	c.Assert(

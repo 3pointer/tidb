@@ -280,7 +280,7 @@ bench-daily:
 build_tools: build_br build_lightning build_lightning-ctl
 
 br_web:
-       @cd br/web && npm install && npm run build
+	@cd br/web && npm install && npm run build
 
 build_br:
 	$(GOBUILD) $(RACE_FLAG) -o $(BR_BIN) br/cmd/br/*.go
@@ -330,7 +330,6 @@ br_compatibility_test_prepare:
 
 br_compatibility_test:
 	@cd br && tests/run_compatible.sh run
->>>>>>> 83df3a513 (fix test in makefile)
 
 # There is no FreeBSD environment for GitHub actions. So cross-compile on Linux
 # but that doesn't work with CGO_ENABLED=1, so disable cgo. The reason to have
