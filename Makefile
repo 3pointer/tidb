@@ -13,7 +13,7 @@
 
 include Makefile.common
 
-.PHONY: all clean test gotest server dev benchkv benchraw check checklist parser tidy ddltest web
+.PHONY: all clean test gotest server dev benchkv benchraw check checklist parser tidy ddltest br_web
 
 default: server buildsucc
 
@@ -104,44 +104,6 @@ testSuite:
 clean: failpoint-disable
 	$(GO) clean -i ./...
 
-build_tools: build_br build_lightning build_lightning-ctl
-
-br_web:
-	@cd br/web && npm install && npm run build
-
-build_br:
-	$(GOBUILD) $(RACEFLAG) -o $(BR_BIN) br/cmd/br/*.go
-
-build_lightning_for_web:
-	$(GOBUILD) $(RACEFLAG) -tags dev -o $(LIGHTNING_BIN) br/cmd/tidb-lightning/main.go
-
-build_lightning:
-	$(GOBUILD) $(RACEFLAG) -o $(LIGHTNING_BIN) br/cmd/tidb-lightning/main.go
-
-build_lightning-ctl:
-	$(GOBUILD) $(RACEFLAG) -o $(LIGHTNING_CTL_BIN) br/cmd/tidb-lightning-ctl/main.go
-
-build_for_br_integration_test:
-	@make failpoint-enable
-	($(GOTEST) -c -cover -covermode=count \
-		-coverpkg=$(BR_PKG)/... \
-		-o $(BR_BIN).test \
-		github.com/pingcap/br/cmd/br && \
-	$(GOTEST) -c -cover -covermode=count \
-		-coverpkg=$(BR_PKG)/... \
-		-o $(LIGHTNING_BIN).test \
-		github.com/pingcap/br/cmd/tidb-lightning && \
-	$(GOTEST) -c -cover -covermode=count \
-		-coverpkg=$(BR_PKG)/... \
-		-o $(LIGHTNING_CTL_BIN).test \
-		github.com/pingcap/br/cmd/tidb-lightning-ctl && \
-	$(GOBUILD) $(RACEFLAG) -o bin/locker br/tests/br_key_locked/*.go && \
-	$(GOBUILD) $(RACEFLAG) -o bin/gc br/tests/br_z_gc_safepoint/*.go && \
-	$(GOBUILD) $(RACEFLAG) -o bin/oauth br/tests/br_gcs/*.go && \
-	$(GOBUILD) $(RACEFLAG) -o bin/rawkv br/tests/br_rawkv/*.go && \
-	$(GOBUILD) $(RACEFLAG) -o bin/parquet_gen br/tests/lightning_checkpoint_parquet/*.go \
-	) || (make failpoint-disable && exit 1)
-	@make failpoint-disable
 
 # Split tests for CI to run `make test` in parallel.
 test: test_part_1 test_part_2 test_part_br
@@ -152,15 +114,6 @@ test_part_1: checklist explaintest
 test_part_2: gotest gogenerate
 
 test_part_br: br_unit_test br_integration_test
-
-br_integration_test: br_bins br_build br_build_for_integration_test
-	@cd br && tests/run.sh
-
-br_compatibility_test_prepare:
-	@cd br && tests/run_compatible.sh prepare
-
-br_compatibility_test:
-	@cd br && tests/run_compatible.sh run
 
 explaintest: server_check
 	@cd cmd/explaintest && ./run-tests.sh -s ../../bin/tidb-server
@@ -182,7 +135,7 @@ ifeq ("$(TRAVIS_COVERAGE)", "1")
 	@export log_level=info; \
 	$(OVERALLS) -project=github.com/pingcap/tidb \
 			-covermode=count \
-			-ignore='.git,vendor,cmd,docs,tests,LICENSES' \
+			-ignore='.git,br,vendor,cmd,docs,tests,LICENSES' \
 			-concurrency=4 \
 			-- -coverpkg=./... \
 			|| { $(FAILPOINT_DISABLE); exit 1; }
@@ -293,6 +246,10 @@ tools/bin/errdoc-gen: tools/check/go.mod
 tools/bin/golangci-lint:
 	curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh| sh -s -- -b ./tools/bin v1.41.1
 
+tools/bin/vfsgendev: tools/check/go.mod
+	cd tools/check; \
+	$(GO) build -o ../bin/vfsgendev github.com/shurcooL/vfsgen/cmd/vfsgendev
+
 # Usage:
 #
 # 	$ make vectorized-bench VB_FILE=Time VB_FUNC=builtinCurrentDateSig
@@ -320,6 +277,61 @@ bench-daily:
 	cd ./session && \
 	go test -run TestBenchDaily --date `git log -n1 --date=unix --pretty=format:%cd` --commit `git log -n1 --pretty=format:%h` --outfile $(TO)
 
+build_tools: build_br build_lightning build_lightning-ctl
+
+br_web:
+       @cd br/web && npm install && npm run build
+
+build_br:
+	$(GOBUILD) $(RACE_FLAG) -o $(BR_BIN) br/cmd/br/*.go
+
+build_lightning_for_web:
+	$(GOBUILD) $(RACE_FLAG) -tags dev -o $(LIGHTNING_BIN) br/cmd/tidb-lightning/main.go
+
+build_lightning:
+	$(GOBUILD) $(RACE_FLAG) -o $(LIGHTNING_BIN) br/cmd/tidb-lightning/main.go
+
+build_lightning-ctl:
+	$(GOBUILD) $(RACE_FLAG) -o $(LIGHTNING_CTL_BIN) br/cmd/tidb-lightning-ctl/main.go
+
+build_for_br_integration_test:
+	@make failpoint-enable
+	($(GOTEST) -c -cover -covermode=count \
+		-coverpkg=github.com/pingcap/tidb/br/... \
+		-o $(BR_BIN).test \
+		github.com/pingcap/tidb/br/cmd/br && \
+	$(GOTEST) -c -cover -covermode=count \
+		-coverpkg=github.com/pingcap/tidb/br/... \
+		-o $(LIGHTNING_BIN).test \
+		github.com/pingcap/tidb/br/cmd/tidb-lightning && \
+	$(GOTEST) -c -cover -covermode=count \
+		-coverpkg=github.com/pingcap/tidb/br/... \
+		-o $(LIGHTNING_CTL_BIN).test \
+		github.com/pingcap/tidb/br/cmd/tidb-lightning-ctl && \
+	$(GOBUILD) $(RACE_FLAG) -o bin/locker br/tests/br_key_locked/*.go && \
+	$(GOBUILD) $(RACE_FLAG) -o bin/gc br/tests/br_z_gc_safepoint/*.go && \
+	$(GOBUILD) $(RACE_FLAG) -o bin/oauth br/tests/br_gcs/*.go && \
+	$(GOBUILD) $(RACE_FLAG) -o bin/rawkv br/tests/br_rawkv/*.go && \
+	$(GOBUILD) $(RACE_FLAG) -o bin/parquet_gen br/tests/lightning_checkpoint_parquet/*.go \
+	) || (make failpoint-disable && exit 1)
+	@make failpoint-disable
+
+br_unit_test: export ARGS=$$($(BR_PACKAGES))
+br_unit_test:
+	@make failpoint-enable
+	$(GOTEST) $(RACE_FLAG) -tags leak $(ARGS) || ( make failpoint-disable && exit 1 )
+	@make failpoint-disable
+
+br_integration_test: br_bins build_br build_for_br_integration_test
+	@cd br && tests/run.sh
+
+br_compatibility_test_prepare:
+	@cd br && tests/run_compatible.sh prepare
+
+br_compatibility_test:
+	@cd br && tests/run_compatible.sh run
+>>>>>>> 83df3a513 (fix test in makefile)
+
 # There is no FreeBSD environment for GitHub actions. So cross-compile on Linux
 # but that doesn't work with CGO_ENABLED=1, so disable cgo. The reason to have
 # cgo enabled on regular builds is performance.
@@ -330,7 +342,7 @@ endif
 br_coverage:
 	tools/bin/gocovmerge "$(TEST_DIR)"/cov.* | grep -vE ".*.pb.go|.*__failpoint_binding__.go" > "$(TEST_DIR)/all_cov.out"
 ifeq ("$(JenkinsCI)", "1")
-        tools/bin/goveralls -coverprofile=$(TEST_DIR)/all_cov.out -service=jenkins-ci -repotoken $(COVERALLS_TOKEN)
+	tools/bin/goveralls -coverprofile=$(TEST_DIR)/all_cov.out -service=jenkins-ci -repotoken $(COVERALLS_TOKEN)
 else
 	go tool cover -html "$(TEST_DIR)/all_cov.out" -o "$(TEST_DIR)/all_cov.html"
 	grep -F '<option' "$(TEST_DIR)/all_cov.html"
@@ -351,3 +363,11 @@ br_bins:
 	@which bin/tikv-importer
 	if [ ! -d bin/flash_cluster_manager ]; then echo "flash_cluster_manager not exist"; exit 1; fi
 
+%_generated.go: %.rl
+	ragel -Z -G2 -o tmp_parser.go $<
+	@echo '// Code generated by ragel DO NOT EDIT.' | cat - tmp_parser.go | sed 's|//line |//.... |g' > $@
+	@rm tmp_parser.go
+
+data_parsers: tools/bin/vfsgendev br/pkg/lightning/mydump/parser_generated.go br_web
+	PATH="$(GOPATH)/bin":"$(PATH)":"$(TOOLS)" protoc -I. -I"$(GOPATH)/src" br/pkg/lightning/checkpoints/checkpointspb/file_checkpoints.proto --gogofaster_out=.
+	tools/bin/vfsgendev -source='"github.com/pingcap/br/pkg/lightning/web".Res' && mv res_vfsdata.go br/pkg/lightning/web/
