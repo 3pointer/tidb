@@ -10,9 +10,9 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
-	kv "github.com/pingcap/br/pkg/lightning/backend/kv"
-	log "github.com/pingcap/br/pkg/lightning/log"
-	verification "github.com/pingcap/br/pkg/lightning/verification"
+	kv "github.com/pingcap/tidb/br/pkg/lightning/backend/kv"
+	log "github.com/pingcap/tidb/br/pkg/lightning/log"
+	verification "github.com/pingcap/tidb/br/pkg/lightning/verification"
 	types "github.com/pingcap/tidb/types"
 )
 
