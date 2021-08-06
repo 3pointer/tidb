@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/pingcap/errors"
-
-	backuppb "github.com/pingcap/kvproto/pkg/backup"
+	backuppb "github.com/pingcap/kvproto/pkg/brpb"
 )
 
 // MarshalBackupMeta converts the backupmeta strcture to JSON.

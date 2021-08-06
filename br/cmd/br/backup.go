@@ -5,18 +5,17 @@ package main
 import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/pingcap/tidb/br/pkg/gluetikv"
+	"github.com/pingcap/tidb/br/pkg/summary"
+	"github.com/pingcap/tidb/br/pkg/task"
+	"github.com/pingcap/tidb/br/pkg/trace"
+	"github.com/pingcap/tidb/br/pkg/utils"
+	"github.com/pingcap/tidb/br/pkg/version/build"
 	"github.com/pingcap/tidb/ddl"
 	"github.com/pingcap/tidb/session"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"sourcegraph.com/sourcegraph/appdash"
-
-	"github.com/pingcap/br/pkg/gluetikv"
-	"github.com/pingcap/br/pkg/summary"
-	"github.com/pingcap/br/pkg/task"
-	"github.com/pingcap/br/pkg/trace"
-	"github.com/pingcap/br/pkg/utils"
-	"github.com/pingcap/br/pkg/version/build"
 )
 
 func runBackupCommand(command *cobra.Command, cmdName string) error {

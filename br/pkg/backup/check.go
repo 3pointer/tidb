@@ -7,9 +7,8 @@ import (
 
 	"github.com/google/btree"
 	"github.com/pingcap/log"
+	"github.com/pingcap/tidb/br/pkg/rtree"
 	"go.uber.org/zap"
-
-	"github.com/pingcap/br/pkg/rtree"
 )
 
 // checkDupFiles checks if there are any files are duplicated.

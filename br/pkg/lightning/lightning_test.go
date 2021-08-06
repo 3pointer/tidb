@@ -36,11 +36,10 @@ import (
 	"github.com/docker/go-units"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
-
-	"github.com/pingcap/br/pkg/lightning/checkpoints"
-	"github.com/pingcap/br/pkg/lightning/config"
-	"github.com/pingcap/br/pkg/lightning/glue"
-	"github.com/pingcap/br/pkg/lightning/mydump"
+	"github.com/pingcap/tidb/br/pkg/lightning/checkpoints"
+	"github.com/pingcap/tidb/br/pkg/lightning/config"
+	"github.com/pingcap/tidb/br/pkg/lightning/glue"
+	"github.com/pingcap/tidb/br/pkg/lightning/mydump"
 )
 
 type lightningSuite struct{}
@@ -131,11 +130,11 @@ func (s *lightningServerSuite) SetUpTest(c *C) {
 	s.lightning.ctx = context.WithValue(s.lightning.ctx, &taskCfgRecorderKey, s.taskCfgCh)
 	_ = s.lightning.GoServe()
 
-	_ = failpoint.Enable("github.com/pingcap/br/pkg/lightning/SkipRunTask", "return")
+	_ = failpoint.Enable("github.com/pingcap/tidb/br/pkg/lightning/SkipRunTask", "return")
 }
 
 func (s *lightningServerSuite) TearDownTest(c *C) {
-	_ = failpoint.Disable("github.com/pingcap/br/pkg/lightning/SkipRunTask")
+	_ = failpoint.Disable("github.com/pingcap/tidb/br/pkg/lightning/SkipRunTask")
 	s.lightning.Stop()
 }
 
@@ -244,7 +243,7 @@ func (s *lightningServerSuite) TestGetDeleteTask(c *C) {
 	go func() {
 		_ = s.lightning.RunServer()
 	}()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	// Check `GET /tasks` without any active tasks
 
@@ -376,7 +375,7 @@ func (s *lightningServerSuite) TestHTTPAPIOutsideServerMode(c *C) {
 	go func() {
 		errCh <- s.lightning.RunOnce(s.lightning.ctx, cfg, nil)
 	}()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(600 * time.Millisecond)
 
 	var curTask struct {
 		Current int64
@@ -486,24 +485,24 @@ func (s *lightningServerSuite) TestCheckSystemRequirement(c *C) {
 	}
 
 	// with max open files 1024, the max table size will be: 65536MB
-	err := failpoint.Enable("github.com/pingcap/br/pkg/lightning/backend/local/GetRlimitValue", "return(2049)")
+	err := failpoint.Enable("github.com/pingcap/tidb/br/pkg/lightning/backend/local/GetRlimitValue", "return(2049)")
 	c.Assert(err, IsNil)
-	err = failpoint.Enable("github.com/pingcap/br/pkg/lightning/backend/local/SetRlimitError", "return(true)")
+	err = failpoint.Enable("github.com/pingcap/tidb/br/pkg/lightning/backend/local/SetRlimitError", "return(true)")
 	c.Assert(err, IsNil)
 	defer func() {
-		_ = failpoint.Disable("github.com/pingcap/br/pkg/lightning/backend/local/SetRlimitError")
+		_ = failpoint.Disable("github.com/pingcap/tidb/br/pkg/lightning/backend/local/SetRlimitError")
 	}()
 	// with this dbMetas, the estimated fds will be 2050, so should return error
 	err = checkSystemRequirement(cfg, dbMetas)
 	c.Assert(err, NotNil)
 
-	err = failpoint.Disable("github.com/pingcap/br/pkg/lightning/backend/local/GetRlimitValue")
+	err = failpoint.Disable("github.com/pingcap/tidb/br/pkg/lightning/backend/local/GetRlimitValue")
 	c.Assert(err, IsNil)
 
 	// the min rlimit should be bigger than the default min value (16384)
-	err = failpoint.Enable("github.com/pingcap/br/pkg/lightning/backend/local/GetRlimitValue", "return(8200)")
+	err = failpoint.Enable("github.com/pingcap/tidb/br/pkg/lightning/backend/local/GetRlimitValue", "return(8200)")
 	defer func() {
-		_ = failpoint.Disable("github.com/pingcap/br/pkg/lightning/backend/local/GetRlimitValue")
+		_ = failpoint.Disable("github.com/pingcap/tidb/br/pkg/lightning/backend/local/GetRlimitValue")
 	}()
 	c.Assert(err, IsNil)
 	err = checkSystemRequirement(cfg, dbMetas)

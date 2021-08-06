@@ -5,22 +5,19 @@ package utils
 import (
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"sync"
 
-	tidbutils "github.com/pingcap/tidb-tools/pkg/utils"
-
-	berrors "github.com/pingcap/br/pkg/errors"
-
-	"github.com/pingcap/errors"
-
 	// #nosec
 	// register HTTP handler for /debug/pprof
+	"net/http"
 	_ "net/http/pprof"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	tidbutils "github.com/pingcap/tidb-tools/pkg/utils"
+	berrors "github.com/pingcap/tidb/br/pkg/errors"
 	"go.uber.org/zap"
 )
 

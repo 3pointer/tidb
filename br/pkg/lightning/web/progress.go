@@ -5,10 +5,9 @@ import (
 	"sync"
 
 	"github.com/pingcap/errors"
-
-	"github.com/pingcap/br/pkg/lightning/checkpoints"
-	"github.com/pingcap/br/pkg/lightning/common"
-	"github.com/pingcap/br/pkg/lightning/mydump"
+	"github.com/pingcap/tidb/br/pkg/lightning/checkpoints"
+	"github.com/pingcap/tidb/br/pkg/lightning/common"
+	"github.com/pingcap/tidb/br/pkg/lightning/mydump"
 )
 
 // checkpointsMap is a concurrent map (table name → checkpoints).

@@ -21,11 +21,10 @@ import (
 	"github.com/pingcap/errors"
 	filter "github.com/pingcap/tidb-tools/pkg/table-filter"
 	router "github.com/pingcap/tidb-tools/pkg/table-router"
+	"github.com/pingcap/tidb/br/pkg/lightning/config"
+	"github.com/pingcap/tidb/br/pkg/lightning/log"
+	"github.com/pingcap/tidb/br/pkg/storage"
 	"go.uber.org/zap"
-
-	"github.com/pingcap/br/pkg/lightning/config"
-	"github.com/pingcap/br/pkg/lightning/log"
-	"github.com/pingcap/br/pkg/storage"
 )
 
 type MDDatabaseMeta struct {
@@ -37,12 +36,14 @@ type MDDatabaseMeta struct {
 }
 
 type MDTableMeta struct {
-	DB         string
-	Name       string
-	SchemaFile FileInfo
-	DataFiles  []FileInfo
-	charSet    string
-	TotalSize  int64
+	DB           string
+	Name         string
+	SchemaFile   FileInfo
+	DataFiles    []FileInfo
+	charSet      string
+	TotalSize    int64
+	IndexRatio   float64
+	IsRowOrdered bool
 }
 
 type SourceFileMeta struct {
@@ -427,11 +428,13 @@ func (s *mdLoaderSetup) insertTable(fileInfo FileInfo) (*MDTableMeta, bool, bool
 	}
 	s.tableIndexMap[fileInfo.TableName] = len(dbMeta.Tables)
 	ptr := &MDTableMeta{
-		DB:         fileInfo.TableName.Schema,
-		Name:       fileInfo.TableName.Name,
-		SchemaFile: fileInfo,
-		DataFiles:  make([]FileInfo, 0, 16),
-		charSet:    s.loader.charSet,
+		DB:           fileInfo.TableName.Schema,
+		Name:         fileInfo.TableName.Name,
+		SchemaFile:   fileInfo,
+		DataFiles:    make([]FileInfo, 0, 16),
+		charSet:      s.loader.charSet,
+		IndexRatio:   0.0,
+		IsRowOrdered: true,
 	}
 	dbMeta.Tables = append(dbMeta.Tables, ptr)
 	return ptr, dbExists, false
@@ -442,10 +445,12 @@ func (s *mdLoaderSetup) insertView(fileInfo FileInfo) (bool, bool) {
 	_, ok := s.tableIndexMap[fileInfo.TableName]
 	if ok {
 		meta := &MDTableMeta{
-			DB:         fileInfo.TableName.Schema,
-			Name:       fileInfo.TableName.Name,
-			SchemaFile: fileInfo,
-			charSet:    s.loader.charSet,
+			DB:           fileInfo.TableName.Schema,
+			Name:         fileInfo.TableName.Name,
+			SchemaFile:   fileInfo,
+			charSet:      s.loader.charSet,
+			IndexRatio:   0.0,
+			IsRowOrdered: true,
 		}
 		dbMeta.Views = append(dbMeta.Views, meta)
 	}

@@ -13,12 +13,11 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
+	berrors "github.com/pingcap/tidb/br/pkg/errors"
+	"github.com/pingcap/tidb/br/pkg/httputil"
 	"github.com/pingcap/tidb/tablecodec"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server/schedule/placement"
-
-	berrors "github.com/pingcap/br/pkg/errors"
-	"github.com/pingcap/br/pkg/httputil"
 )
 
 // UndoFunc is a 'undo' operation of some undoable command.

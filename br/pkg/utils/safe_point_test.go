@@ -7,10 +7,9 @@ import (
 	"sync"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/tidb/br/pkg/utils"
 	"github.com/pingcap/tidb/util/testleak"
 	pd "github.com/tikv/pd/client"
-
-	"github.com/pingcap/br/pkg/utils"
 )
 
 var _ = Suite(&testSafePointSuite{})

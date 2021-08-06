@@ -33,11 +33,10 @@ import (
 	"github.com/pingcap/parser/mysql"
 	filter "github.com/pingcap/tidb-tools/pkg/table-filter"
 	router "github.com/pingcap/tidb-tools/pkg/table-router"
+	"github.com/pingcap/tidb/br/pkg/lightning/common"
+	"github.com/pingcap/tidb/br/pkg/lightning/log"
 	tidbcfg "github.com/pingcap/tidb/config"
 	"go.uber.org/zap"
-
-	"github.com/pingcap/br/pkg/lightning/common"
-	"github.com/pingcap/br/pkg/lightning/log"
 )
 
 const (
@@ -843,7 +842,7 @@ func (cfg *Config) AdjustMydumper() {
 	if cfg.Mydumper.BatchSize <= 0 {
 		// if rows in source files are not sorted by primary key(if primary is number or cluster index enabled),
 		// the key range in each data engine may have overlap, thus a bigger engine size can somewhat alleviate it.
-		cfg.Mydumper.BatchSize = defaultBatchSize
+		cfg.Mydumper.BatchSize = DefaultBatchSize
 	}
 	if cfg.Mydumper.BatchImportRatio < 0.0 || cfg.Mydumper.BatchImportRatio >= 1.0 {
 		cfg.Mydumper.BatchImportRatio = 0.75

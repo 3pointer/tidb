@@ -25,14 +25,13 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/mysql"
+	"github.com/pingcap/tidb/br/pkg/lightning/config"
+	"github.com/pingcap/tidb/br/pkg/lightning/log"
+	"github.com/pingcap/tidb/br/pkg/lightning/metric"
+	"github.com/pingcap/tidb/br/pkg/lightning/worker"
 	"github.com/pingcap/tidb/types"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-
-	"github.com/pingcap/br/pkg/lightning/config"
-	"github.com/pingcap/br/pkg/lightning/log"
-	"github.com/pingcap/br/pkg/lightning/metric"
-	"github.com/pingcap/br/pkg/lightning/worker"
 )
 
 type blockParser struct {
@@ -92,8 +91,9 @@ type Chunk struct {
 
 // Row is the content of a row.
 type Row struct {
-	RowID int64
-	Row   []types.Datum
+	RowID  int64
+	Row    []types.Datum
+	Length int
 }
 
 // MarshalLogArray implements the zapcore.ArrayMarshaler interface
@@ -413,6 +413,7 @@ func (parser *ChunkParser) ReadRow() error {
 
 	row := &parser.lastRow
 	st := stateValues
+	row.Length = 0
 
 	for {
 		tok, content, err := parser.lex()
@@ -422,6 +423,7 @@ func (parser *ChunkParser) ReadRow() error {
 			}
 			return errors.Trace(err)
 		}
+		row.Length += len(content)
 		switch st {
 		case stateTableName:
 			switch tok {

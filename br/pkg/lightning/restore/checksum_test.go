@@ -10,24 +10,19 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/tidb/util/memory"
-
-	"github.com/pingcap/parser"
-	"github.com/pingcap/parser/ast"
-	"github.com/pingcap/tidb/ddl"
-	tmock "github.com/pingcap/tidb/util/mock"
-	"github.com/tikv/client-go/v2/oracle"
-
-	"github.com/pingcap/tidb/kv"
-	"github.com/pingcap/tipb/go-tipb"
-
-	pd "github.com/tikv/pd/client"
-
 	"github.com/DATA-DOG/go-sqlmock"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
-
-	. "github.com/pingcap/br/pkg/lightning/checkpoints"
+	"github.com/pingcap/parser"
+	"github.com/pingcap/parser/ast"
+	. "github.com/pingcap/tidb/br/pkg/lightning/checkpoints"
+	"github.com/pingcap/tidb/ddl"
+	"github.com/pingcap/tidb/kv"
+	"github.com/pingcap/tidb/util/memory"
+	tmock "github.com/pingcap/tidb/util/mock"
+	"github.com/pingcap/tipb/go-tipb"
+	"github.com/tikv/client-go/v2/oracle"
+	pd "github.com/tikv/pd/client"
 )
 
 var _ = Suite(&checksumSuite{})
@@ -162,7 +157,7 @@ func (s *checksumSuite) TestDoChecksumWithTikv(c *C) {
 	// set up mock tikv checksum manager
 	pdClient := &testPDClient{}
 	resp := tipb.ChecksumResponse{Checksum: 123, TotalKvs: 10, TotalBytes: 1000}
-	kvClient := &mockChecksumKVClient{checksum: resp, respDur: time.Second * 5}
+	kvClient := &mockChecksumKVClient{checksum: resp, respDur: time.Millisecond * 200}
 
 	// mock a table info
 	p := parser.New()
@@ -281,8 +276,8 @@ func (s *checksumSuite) TestGcTTLManagerSingle(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	oldTTL := serviceSafePointTTL
-	// set serviceSafePointTTL to 3 second, so lightning will update it in each 1 seconds.
-	serviceSafePointTTL = 3
+	// set serviceSafePointTTL to 1 second, so lightning will update it in each 1/3 seconds.
+	serviceSafePointTTL = 1
 	defer func() {
 		serviceSafePointTTL = oldTTL
 	}()
@@ -290,9 +285,9 @@ func (s *checksumSuite) TestGcTTLManagerSingle(c *C) {
 	err := manager.addOneJob(ctx, "test", uint64(time.Now().Unix()))
 	c.Assert(err, IsNil)
 
-	time.Sleep(6*time.Second + 10*time.Millisecond)
+	time.Sleep(2*time.Second + 10*time.Millisecond)
 
-	// after 6 seconds, must at least update 5 times
+	// after 2 seconds, must at least update 5 times
 	val := atomic.LoadInt32(&pdClient.count)
 	c.Assert(val, GreaterEqual, int32(5))
 
@@ -300,7 +295,7 @@ func (s *checksumSuite) TestGcTTLManagerSingle(c *C) {
 	manager.removeOneJob("test")
 	time.Sleep(10 * time.Millisecond)
 	val = atomic.LoadInt32(&pdClient.count)
-	time.Sleep(3*time.Second + 10*time.Millisecond)
+	time.Sleep(1*time.Second + 10*time.Millisecond)
 	c.Assert(atomic.LoadInt32(&pdClient.count), Equals, val)
 }
 

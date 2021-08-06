@@ -13,11 +13,10 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	berrors "github.com/pingcap/tidb/br/pkg/errors"
+	"github.com/pingcap/tidb/br/pkg/version/build"
 	pd "github.com/tikv/pd/client"
 	"go.uber.org/zap"
-
-	berrors "github.com/pingcap/br/pkg/errors"
-	"github.com/pingcap/br/pkg/version/build"
 )
 
 var (
