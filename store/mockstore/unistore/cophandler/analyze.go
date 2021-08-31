@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/juju/errors"
+	"github.com/pingcap/errors"
 	"github.com/ngaut/unistore/tikv/dbreader"
 	"github.com/pingcap/badger/y"
 	"github.com/pingcap/kvproto/pkg/coprocessor"
