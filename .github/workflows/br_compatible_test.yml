@@ -38,6 +38,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
+      - uses: khan/pull-request-comment-trigger@master
+        id: check
+        with:
+          trigger: '/run-compatibility-test'
 
     - uses: actions/checkout@v2
 
@@ -49,6 +53,7 @@ jobs:
     - name: Generate compatibility test backup data
       timeout-minutes: 15
       run: sh br/compatibility/prepare_backup.sh
+      if: steps.check.outputs.triggered == 'true'
 
     - name: Start server
       run: |
@@ -57,14 +62,17 @@ jobs:
         TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml up --remove-orphans -d
         TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml exec -T control make build_br
         TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml exec -T control br/tests/run_compatible.sh run
+      if: steps.check.outputs.triggered == 'true'
 
     - name: Collect component log
       if: ${{ failure() }}
       run: |
         tar czvf ${{ github.workspace }}/logs.tar.gz /tmp/br/docker/backup_logs/*
+      if: steps.check.outputs.triggered == 'true'
 
     - uses: actions/upload-artifact@v2
       if: ${{ failure() }}
       with:
         name: logs
         path: ${{ github.workspace }}/logs.tar.gz
+      if: steps.check.outputs.triggered == 'true'

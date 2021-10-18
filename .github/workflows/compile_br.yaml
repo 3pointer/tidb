@@ -50,6 +50,11 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     steps:
+      - uses: khan/pull-request-comment-trigger@master
+        id: check
+        with:
+          trigger: '/run-build'
+
       - uses: actions/checkout@v2.1.0
 
       - name: Set up Go
@@ -59,11 +64,17 @@ jobs:
 
       - name: Run build
         run: make build_tools
+        if: steps.check.outputs.triggered == 'true'
 
   compile-freebsd:
     name: Compile for FreeBSD job
     runs-on: ubuntu-latest
     steps:
+      - uses: khan/pull-request-comment-trigger@master
+        id: check
+        with:
+          trigger: '/run-build'
+
       - uses: actions/checkout@v2.1.0
 
       - name: Set up Go
@@ -73,3 +84,4 @@ jobs:
 
       - name: Compile for FreeBSD
         run: GOOS=freebsd make build_tools
+        if: steps.check.outputs.triggered == 'true'
