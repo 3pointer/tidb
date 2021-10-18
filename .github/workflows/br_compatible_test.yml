@@ -1,23 +1,8 @@
 name: BR / Compatibility Test
 
 on:
-  push:
-    branches:
-      - master
-      - 'release-[0-9].[0-9]*'
-    paths:
-      - 'br/**'
-      - '!**.html'
-      - '!**.md'
-      - '!CNAME'
-      - '!LICENSE'
-      - '!br/docs/**'
-      - '!br/tests/**'
-      - '!br/docker/**'
   pull_request:
-    branches:
-      - master
-      - 'release-[0-9].[0-9]*'
+    types: [opened]
     paths:
       - 'br/**'
       - '!**.html'
@@ -27,6 +12,8 @@ on:
       - '!br/docs/**'
       - '!br/tests/**'
       - '!br/docker/**'
+  issue_comment:
+    types: [created]
 
 # See: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency.
 concurrency:
