@@ -1,19 +1,11 @@
 name: BR / Compatibility Test
 
 on:
-  pull_request:
-    types: [opened]
-    paths:
-      - 'br/**'
-      - '!**.html'
-      - '!**.md'
-      - '!CNAME'
-      - '!LICENSE'
-      - '!br/docs/**'
-      - '!br/tests/**'
-      - '!br/docker/**'
   issue_comment:
     types: [created]
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 # See: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency.
 concurrency:
@@ -23,26 +15,12 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    if: ${{ github.event.issue.pull_request && github.event.comment.body == '/run-compatibility-test' }}
+    if: github.event.issue.pull_request != '' && contains(github.event.comment.body, '/run-br-compatiblilty-test')
     timeout-minutes: 25
     steps:
-      - name: Get PR SHA
-        id: sha
-        uses: actions/github-script@v4
-        with:
-          result-encoding: string
-          script: |
-            const { owner, repo, number } = context.issue;
-            const pr = await github.pulls.get({
-              owner,
-              repo,
-              pull_number: number,
-            });
-            return pr.data.head.sha          
-
       - uses: actions/checkout@v2
         with:
-          ref: ${{ steps.sha.outputs.result }}
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v2
