@@ -23,10 +23,26 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    if: ${{ github.event.issue.pull_request && github.event.comment.body == 'run-compatibility-test' }}
+    if: ${{ github.event.issue.pull_request && github.event.comment.body == '/run-compatibility-test' }}
     timeout-minutes: 25
     steps:
+    - name: Get PR SHA
+      id: sha
+      uses: actions/github-script@v4
+      with:
+        result-encoding: string
+        script: |
+          const { owner, repo, number } = context.issue;
+          const pr = await github.pulls.get({
+            owner,
+            repo,
+            pull_number: number,
+          });
+          return pr.data.head.sha          
+
       - uses: actions/checkout@v2
+        with:
+          ref: ${{ steps.sha.outputs.result }}
 
       - name: Set up Go
         uses: actions/setup-go@v2
@@ -36,7 +52,7 @@ jobs:
       - name: Generate compatibility test backup data
         timeout-minutes: 15
         run: sh br/compatibility/prepare_backup.sh
-
+ 
       - name: Start server
         run: |
           TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml rm -s -v
