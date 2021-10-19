@@ -11,8 +11,8 @@ on:
       - '!br/docs/**'
       - '!br/tests/**'
       - '!br/docker/**'
- issue_comment:
-    types: [created]nv:
+  issue_comment:
+    types: [created]:
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
