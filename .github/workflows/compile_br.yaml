@@ -61,7 +61,7 @@ jobs:
       - uses: khan/pull-request-comment-trigger@master
         id: check
         with:
-          trigger: '/run-br-build'
+          trigger: '/compile-br'
 
       - uses: actions/checkout@v2.1.0
 
