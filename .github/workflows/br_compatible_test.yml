@@ -6,43 +6,71 @@ on:
   issue_comment:
     types: [created]
 
-env:
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 jobs:
   check:
     runs-on: ubuntu-latest
-    if: github.event.issue.pull_request != '' && contains(github.event.comment.body, '/run-br-compatibility-test')
     timeout-minutes: 25
     steps:
-    - uses: actions/checkout@v2
-      with:
-        fetch-depth: 0
+      - uses: khan/pull-request-comment-trigger@master
+        id: check
+        with:
+          trigger: '/run-br-compatibility-test'
+          reaction: rocket
+        env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
 
-    - name: Set up Go 
-      uses: actions/setup-go@v2
-      with:
-        go-version: 1.16
+      - name: GitHub API Request
+        if: steps.check.outputs.triggered == 'true'
+        id: request
+        uses: octokit/request-action@v2.0.0
+        with:
+          route: ${{ github.event.issue.pull_request.url }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Generate compatibility test backup data
-      timeout-minutes: 15
-      run: sh br/compatibility/prepare_backup.sh
+      - name: Get PR informations
+        if: steps.check.outputs.triggered == 'true'
+        id: pr_data
+        run: |
+          echo "::set-output name=branch::${{ fromJson(steps.request.outputs.data).head.ref }}"
+          echo "::set-output name=repo_name::${{ fromJson(steps.request.outputs.data).base.repo.full_name }}"
+          echo "::set-output name=repo_clone_url::${{ fromJson(steps.request.outputs.data).base.repo.clone_url }}"
+          echo "::set-output name=repo_ssh_url::${{ fromJson(steps.request.outputs.data).base.repo.ssh_url }}"
+
+      - name: clone branch of PR
+        if: steps.check.outputs.triggered == 'true'
+        uses: actions/checkout@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ steps.pr_data.outputs.branch }}
+
+      - name: Set up Go 
+        if: steps.check.outputs.triggered == 'true'
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+
+      - name: Generate compatibility test backup data
+        if: steps.check.outputs.triggered == 'true'
+        timeout-minutes: 15
+        run: sh br/compatibility/prepare_backup.sh
  
-    - name: Start server
-      run: |
-        TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml rm -s -v
-        TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml build
-        TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml up --remove-orphans -d
-        TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml exec -T control make build_br
-        TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml exec -T control br/tests/run_compatible.sh run
+      - name: Start server
+        if: steps.check.outputs.triggered == 'true'
+        run: |
+          TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml rm -s -v
+          TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml build
+          TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml up --remove-orphans -d
+          TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml exec -T control make build_br
+          TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml exec -T control br/tests/run_compatible.sh run
 
-    - name: Collect component log
-      if: ${{ failure() }}
-      run: |
-        tar czvf ${{ github.workspace }}/logs.tar.gz /tmp/br/docker/backup_logs/*
+      - name: Collect component log
+        if: ${{ failure() }}
+        run: |
+          tar czvf ${{ github.workspace }}/logs.tar.gz /tmp/br/docker/backup_logs/*
 
-    - uses: actions/upload-artifact@v2
-      if: ${{ failure() }}
-      with:
-        name: logs
-        path: ${{ github.workspace }}/logs.tar.gz
+      - uses: actions/upload-artifact@v2
+        if: ${{ failure() }}
+        with:
+          name: logs
+          path: ${{ github.workspace }}/logs.tar.gz
