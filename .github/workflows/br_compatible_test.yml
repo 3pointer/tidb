@@ -10,19 +10,6 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    name: A job to check the PR labels contain given labels
-    steps:
-    - name: Check PR labels action step
-      id: check_pr_labels
-      uses: shioyang/check-pr-labels-on-push-action@v1.0.3
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        labels: '["br-test"]'
-    - name: See result
-      run: echo "${{ steps.check_pr_labels.outputs.result }}"
-
-  check:
-    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - name: Check PR labels action step
