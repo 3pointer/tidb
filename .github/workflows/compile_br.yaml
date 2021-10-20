@@ -1,10 +1,9 @@
 name: BR & Lightning 
 on:
+  pull_request:
+    types: [opened]
   issue_comment:
     types: [created]
-
-env:
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   compile:
@@ -28,6 +27,8 @@ jobs:
         uses: octokit/request-action@v2.0.2
         with:
           route: ${{ github.event.issue.pull_request.url }}
+	env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get PR informations
         id: pr_data
@@ -61,6 +62,8 @@ jobs:
         uses: octokit/request-action@v2.0.2
         with:
           route: ${{ github.event.issue.pull_request.url }}
+	env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get PR informations
         id: pr_data
