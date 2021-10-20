@@ -26,6 +26,9 @@ on:
       - '!br/docs/**'
       - '!br/tests/**'
       - '!br/docker/**'
+  label:
+    types: [created]
+
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

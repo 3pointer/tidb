@@ -27,6 +27,8 @@ on:
       - '!br/docs/**'
       - '!br/tests/**'
       - '!br/docker/**'
+  label:
+    types: [created]
 
 # See: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency.
 concurrency:
