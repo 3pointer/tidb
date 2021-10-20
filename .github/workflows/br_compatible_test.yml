@@ -20,9 +20,10 @@ jobs:
         labels: '["br-test"]'
     - name: See result
       run: echo "${{ steps.check_pr_labels.outputs.result }}"
+
   check:
     runs-on: ubuntu-latest
-    if:${{ steps.check_pr_labels.outputs.result }}
+    if: ${{ steps.check_pr_labels.outputs.result }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v2
