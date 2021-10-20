@@ -2,7 +2,8 @@ name: BR / Compatibility Test
 
 on:
   push:
-    types: [labeled]
+    branches:
+      - *
   pull_request:
     types: [labeled]
 
