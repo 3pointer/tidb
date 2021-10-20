@@ -45,24 +45,24 @@ jobs:
       uses: shioyang/check-pr-labels-on-push-action@v1.0.3
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        labels: '["need-br-compatibility-test"]'
+        labels: '["needs-br-compatibility-test"]'
 
-    - if: ${{ steps.check_pr_labels.outputs.result }}
+    - if: ${{ steps.check_pr_labels.outputs.result == 'true' }}
       uses: actions/checkout@v2
 
     - name: Set up Go
-      if: ${{ steps.check_pr_labels.outputs.result }}
+      if: ${{ steps.check_pr_labels.outputs.result == 'true' }}
       uses: actions/setup-go@v2
       with:
         go-version: 1.16
 
     - name: Generate compatibility test backup data
-      if: ${{ steps.check_pr_labels.outputs.result }}
+      if: ${{ steps.check_pr_labels.outputs.result == 'true' }}
       timeout-minutes: 15
       run: sh br/compatibility/prepare_backup.sh
 
     - name: Start server
-      if: ${{ steps.check_pr_labels.outputs.result }}
+      if: ${{ steps.check_pr_labels.outputs.result == 'true' }}
       run: |
         TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml rm -s -v
         TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml build
