@@ -1,38 +1,21 @@
 name: BR & Lightning 
 on:
-  push:
-    branches:
-      - master
-      - 'release-[0-9].[0-9]*'
-    paths:
-      - 'br/**'
-      - '!**.html'
-      - '!**.md'
-      - '!CNAME'
-      - '!LICENSE'
-      - '!br/docs/**'
-      - '!br/tests/**'
-      - '!br/docker/**'
-  pull_request:
-    branches:
-      - master
-      - 'release-[0-9].[0-9]*'
-    paths:
-      - 'br/**'
-      - '!**.html'
-      - '!**.md'
-      - '!CNAME'
-      - '!LICENSE'
-      - '!br/docs/**'
-      - '!br/tests/**'
-      - '!br/docker/**'
+  issue_comment:
+    types: [created]
+
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# See: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency.
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
 
 jobs:
   compile:
     name: Compile for ${{ matrix.os }} / ${{ matrix.target}}
     runs-on: ${{ matrix.os }}
+    if: github.event.issue.pull_request != '' && contains(github.event.comment.body, '/run-br-build')
     strategy:
       matrix:
         include:
@@ -58,6 +41,7 @@ jobs:
   compile-freebsd:
     name: Compile for FreeBSD job
     runs-on: ubuntu-latest
+    if: github.event.issue.pull_request != '' && contains(github.event.comment.body, '/run-br-build')
     steps:
       - uses: actions/checkout@v2.1.0
 
