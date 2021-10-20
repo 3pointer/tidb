@@ -23,7 +23,7 @@ jobs:
 
   check:
     runs-on: ubuntu-latest
-    if: ${{ steps.check_pr_labels.outputs.result }}
+    if: github.event.label.name == 'br-test'
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v2
