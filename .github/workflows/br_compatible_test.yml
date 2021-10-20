@@ -4,6 +4,9 @@ on:
   issue_comment:
     types: [created]
 
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 # See: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency.
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
@@ -12,7 +15,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    if: github.event.issue.pull_request != '' && contains(github.event.comment.body, 'foo')
+    if: github.event.issue.pull_request != '' && contains(github.event.comment.body, '/run-br-compatibility-test')
     timeout-minutes: 25
     steps:
     - uses: actions/checkout@v2
