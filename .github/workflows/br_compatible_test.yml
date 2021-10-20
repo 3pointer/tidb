@@ -3,7 +3,7 @@ name: BR / Compatibility Test
 on:
   push:
     branches:
-      - *
+      - simple*
   pull_request:
     types: [labeled]
 
