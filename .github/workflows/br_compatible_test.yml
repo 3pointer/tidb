@@ -27,25 +27,42 @@ on:
       - '!br/docs/**'
       - '!br/tests/**'
       - '!br/docker/**'
+  label:
+    types: [created]
+
+# See: https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions#concurrency.
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
 
 jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
+    - name: Check PR labels 
+      id: check_pr_labels
+      uses: shioyang/check-pr-labels-on-push-action@v1.0.3
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        labels: '["need-br-compatibility-test"]'
 
-    - uses: actions/checkout@v2
+    - if: ${{ steps.check_pr_labels.outputs.result }}
+      uses: actions/checkout@v2
 
     - name: Set up Go
+      if: ${{ steps.check_pr_labels.outputs.result }}
       uses: actions/setup-go@v2
       with:
         go-version: 1.16
 
     - name: Generate compatibility test backup data
+      if: ${{ steps.check_pr_labels.outputs.result }}
       timeout-minutes: 15
       run: sh br/compatibility/prepare_backup.sh
 
     - name: Start server
+      if: ${{ steps.check_pr_labels.outputs.result }}
       run: |
         TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml rm -s -v
         TAG=nightly PORT_SUFFIX=1 docker-compose -f br/compatibility/backup_cluster.yaml build
