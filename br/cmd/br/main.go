@@ -26,7 +26,7 @@ func main() {
 
 	go func() {
 		sig := <-sc
-		fmt.Printf("\nGot signal [%v] to exit!!!!!\n", sig)
+		fmt.Printf("\nGot signal [%v] to exit!!!!!!\n", sig)
 		log.Warn("received signal to exit", zap.Stringer("signal", sig))
 		cancel()
 		fmt.Fprintln(os.Stderr, "gracefully shuting down, press ^C again to force exit")
