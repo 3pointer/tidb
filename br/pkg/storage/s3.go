@@ -439,7 +439,7 @@ func (rs *S3Storage) WalkDir(ctx context.Context, opt *WalkOption, fn func(strin
 		opt = &WalkOption{}
 	}
 	prefix := path.Join(rs.options.Prefix, opt.SubDir)
-	if len(prefix) > 0 && !strings.HasSuffix(prefix, "/") {
+	if len(prefix) > 0 && !strings.HasSuffix(prefix, "/") && len(opt.SubDir) == 0 {
 		prefix += "/"
 	}
 	maxKeys := int64(1000)
