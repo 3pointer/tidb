@@ -15,7 +15,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	backuppb "github.com/pingcap/kvproto/pkg/brpb"
-	"github.com/pingcap/kvproto/pkg/errorpb"
 	"github.com/pingcap/kvproto/pkg/import_sstpb"
 	"github.com/pingcap/kvproto/pkg/kvrpcpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -323,7 +322,7 @@ func (importer *FileImporter) ImportKVFileForRegion(
 ) rpcResult {
 	// Try to download file.
 	result := importer.downloadAndApplyKVFile(ctx, file, rule, info, restoreTs)
-	if result.Err != nil {
+	if !result.OK() {
 		errDownload := result.Err
 		for _, e := range multierr.Errors(errDownload) {
 			switch errors.Cause(e) { // nolint:errorlint
@@ -335,8 +334,8 @@ func (importer *FileImporter) ImportKVFileForRegion(
 				return rpcResultOK()
 			}
 		}
-		logutil.CL(ctx).Error("download and apply file failed",
-			logutil.ShortError(errDownload))
+		logutil.CL(ctx).Warn("download and apply file failed",
+			logutil.ShortError(&result))
 		return result
 	}
 	summary.CollectInt("RegionInvolved", 1)
@@ -361,44 +360,11 @@ func (importer *FileImporter) ImportKVFiles(
 		logutil.Key("startKey", startKey),
 		logutil.Key("endKey", endKey))
 
-	err = utils.WithRetry(ctx, func() error {
-		tctx, cancel := context.WithTimeout(ctx, importScanRegionTime)
-		defer cancel()
-		// Scan regions covered by the file range
-		regionInfos, errScanRegion := PaginateScanRegion(
-			tctx, importer.metaClient, startKey, endKey, ScanRegionPaginationLimit)
-		if errScanRegion != nil {
-			return errors.Trace(errScanRegion)
-		}
-
-		log.Debug("scan regions", zap.String("name", file.Path), zap.Int("count", len(regionInfos)))
-		// Try to download and ingest the file in every region
-		lctx := logutil.ContextWithField(
-			ctx,
-			logutil.Key("startKey", startKey),
-			logutil.Key("endKey", endKey),
-			logutil.Key("fileStart", file.StartKey),
-			logutil.Key("fileEnd", file.EndKey),
-		)
-		for _, regionInfo := range regionInfos {
-			result := importer.ImportKVFileForRegion(lctx, file, rule, restoreTs, regionInfo)
-
-			switch result.StrategyForRetry() {
-			case giveUp:
-				logutil.CL(lctx).Warn("unexpected error, should stop to retry", logutil.ShortError(&result), logutil.Region(regionInfo.Region))
-				return errors.Annotatef(&result, "failed to import the file %s to region %s", file.Path, regionInfo.Region)
-			case fromThisRegion:
-				logutil.CL(lctx).Warn("retry for region", logutil.Region(regionInfo.Region), logutil.ShortError(&result))
-				continue
-			case fromStart:
-				logutil.CL(lctx).Warn("retry for file", logutil.ShortError(&result))
-				// TODO: make a backoffer considering more about the error info,
-				//       instead of ingore the result and retry.
-				return errors.Annotatef(berrors.ErrKVEpochNotMatch, "failed to import the file %s to region %s", file.Path, regionInfo.Region)
-			}
-		}
-		return nil
-	}, utils.NewImportSSTBackoffer())
+	rs := initialRetryStatus(16, 100*time.Millisecond, 4*time.Second)
+	ctl := overRegionsInRange(startKey, endKey, importer.metaClient, rs)
+	err = ctl.Run(ctx, func(ctx context.Context, r *RegionInfo) rpcResult {
+		return importer.ImportKVFileForRegion(ctx, file, rule, restoreTs, r)
+	})
 
 	log.Debug("download and apply file done",
 		zap.String("file", file.Path),
@@ -792,75 +758,6 @@ func (importer *FileImporter) ingestSSTs(
 	return resp, errors.Trace(err)
 }
 
-type rpcResult struct {
-	Err        error
-	StoreError *errorpb.Error
-}
-
-func rpcResultFromError(err error) rpcResult {
-	return rpcResult{
-		Err: err,
-	}
-}
-
-func rpcResultOK() rpcResult {
-	return rpcResult{}
-}
-
-type retryStrategy int
-
-const (
-	giveUp retryStrategy = iota
-	fromThisRegion
-	fromStart
-)
-
-func (r *rpcResult) StrategyForRetry() retryStrategy {
-	if r.Err != nil {
-		return r.StrategyForRetryGoError()
-	}
-	return r.StrategyForRetryStoreError()
-}
-
-func (r *rpcResult) StrategyForRetryStoreError() retryStrategy {
-	if r.StoreError == nil {
-		return giveUp
-	}
-
-	if r.StoreError.GetServerIsBusy() != nil ||
-		r.StoreError.GetNotLeader() != nil ||
-		r.StoreError.GetRegionNotFound() != nil {
-		return fromThisRegion
-	}
-
-	return fromStart
-}
-
-func (r *rpcResult) StrategyForRetryGoError() retryStrategy {
-	if r.Err == nil {
-		return giveUp
-	}
-
-	if gRPCErr, ok := status.FromError(r.Err); ok {
-		switch gRPCErr.Code() {
-		case codes.Unavailable, codes.Aborted, codes.ResourceExhausted:
-			return fromThisRegion
-		}
-	}
-
-	return giveUp
-}
-
-func (r *rpcResult) Error() string {
-	if r.Err != nil {
-		return r.Err.Error()
-	}
-	if r.StoreError != nil {
-		return r.StoreError.GetMessage()
-	}
-	return "<no error>"
-}
-
 func (importer *FileImporter) downloadAndApplyKVFile(
 	ctx context.Context,
 	file *backuppb.DataFileInfo,
@@ -913,8 +810,8 @@ func (importer *FileImporter) downloadAndApplyKVFile(
 		return rpcResultFromError(errors.Trace(err))
 	}
 	if resp.GetError() != nil {
+		logutil.CL(ctx).Warn("backup meet error", zap.Stringer("error", resp.GetError()))
 		return rpcResult{
-			Err:        errors.Annotatef(berrors.ErrKVDownloadFailed, "failed to download: %s", resp.GetError().GetMessage()),
 			StoreError: resp.GetError().GetStoreError(),
 		}
 	}
