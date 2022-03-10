@@ -319,7 +319,7 @@ func (importer *FileImporter) ImportKVFileForRegion(
 	rule *RewriteRules,
 	restoreTs uint64,
 	info *RegionInfo,
-) rpcResult {
+) RPCResult {
 	// Try to download file.
 	result := importer.downloadAndApplyKVFile(ctx, file, rule, info, restoreTs)
 	if !result.OK() {
@@ -331,7 +331,7 @@ func (importer *FileImporter) ImportKVFileForRegion(
 				logutil.CL(ctx).Warn("download file skipped",
 					logutil.Region(info.Region),
 					logutil.ShortError(e))
-				return rpcResultOK()
+				return RPCResultOK()
 			}
 		}
 		logutil.CL(ctx).Warn("download and apply file failed",
@@ -339,7 +339,7 @@ func (importer *FileImporter) ImportKVFileForRegion(
 		return result
 	}
 	summary.CollectInt("RegionInvolved", 1)
-	return rpcResultOK()
+	return RPCResultOK()
 }
 
 func (importer *FileImporter) ImportKVFiles(
@@ -360,9 +360,9 @@ func (importer *FileImporter) ImportKVFiles(
 		logutil.Key("startKey", startKey),
 		logutil.Key("endKey", endKey))
 
-	rs := initialRetryStatus(16, 100*time.Millisecond, 4*time.Second)
-	ctl := overRegionsInRange(startKey, endKey, importer.metaClient, rs)
-	err = ctl.Run(ctx, func(ctx context.Context, r *RegionInfo) rpcResult {
+	rs := utils.InitialRetryState(16, 100*time.Millisecond, 4*time.Second)
+	ctl := OverRegionsInRange(startKey, endKey, importer.metaClient, rs)
+	err = ctl.Run(ctx, func(ctx context.Context, r *RegionInfo) RPCResult {
 		return importer.ImportKVFileForRegion(ctx, file, rule, restoreTs, r)
 	})
 
@@ -764,16 +764,16 @@ func (importer *FileImporter) downloadAndApplyKVFile(
 	rules *RewriteRules,
 	regionInfo *RegionInfo,
 	restoreTs uint64,
-) rpcResult {
+) RPCResult {
 	leader := regionInfo.Leader
 	if leader == nil {
-		return rpcResultFromError(errors.Annotatef(berrors.ErrPDLeaderNotFound,
+		return RPCResultFromError(errors.Annotatef(berrors.ErrPDLeaderNotFound,
 			"region id %d has no leader", regionInfo.Region.Id))
 	}
 	// Get the rewrite rule for the file.
 	fileRule := findMatchedRewriteRule(file, rules)
 	if fileRule == nil {
-		return rpcResultFromError(errors.Annotatef(berrors.ErrKVRewriteRuleNotFound,
+		return RPCResultFromError(errors.Annotatef(berrors.ErrKVRewriteRuleNotFound,
 			"rewrite rule for file %+v not find (in %+v)", file, rules))
 	}
 	rule := import_sstpb.RewriteRule{
@@ -807,15 +807,15 @@ func (importer *FileImporter) downloadAndApplyKVFile(
 	log.Debug("apply kv file", logutil.Leader(leader))
 	resp, err := importer.importClient.ApplyKVFile(ctx, leader.GetStoreId(), req)
 	if err != nil {
-		return rpcResultFromError(errors.Trace(err))
+		return RPCResultFromError(errors.Trace(err))
 	}
 	if resp.GetError() != nil {
 		logutil.CL(ctx).Warn("backup meet error", zap.Stringer("error", resp.GetError()))
-		return rpcResult{
+		return RPCResult{
 			StoreError: resp.GetError().GetStoreError(),
 		}
 	}
-	return rpcResultOK()
+	return RPCResultOK()
 }
 
 func isDecryptSstErr(err error) bool {

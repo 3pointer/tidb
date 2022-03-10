@@ -1,3 +1,5 @@
+// Copyright 2020 PingCAP, Inc. Licensed under Apache-2.0.
+
 package restore
 
 import (
@@ -6,65 +8,31 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/errorpb"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	berrors "github.com/pingcap/tidb/br/pkg/errors"
 	"github.com/pingcap/tidb/br/pkg/logutil"
+	"github.com/pingcap/tidb/br/pkg/utils"
 	"go.uber.org/multierr"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-// retryStatus is the status needed for retrying.
-// It likes the `utils.Backoffer`, but more fundamental:
-//   this only control the backoff time and knows nothing about what error happens.
-type retryStatus struct {
-	maxRetry   int
-	retryTimes int
+type RegionFunc func(ctx context.Context, r *RegionInfo) RPCResult
 
-	maxBackoff  time.Duration
-	nextBackoff time.Duration
-}
-
-// Whether in the current state we can retry.
-func (rs *retryStatus) ShouldRetry() bool {
-	return rs.retryTimes < rs.maxRetry
-}
-
-// Get the exponential backoff durion and transform the state.
-func (rs *retryStatus) ExponentialBackoff() time.Duration {
-	rs.retryTimes++
-	backoff := rs.nextBackoff
-	rs.nextBackoff *= 2
-	if rs.nextBackoff > rs.maxBackoff {
-		rs.nextBackoff = rs.maxBackoff
-	}
-	return backoff
-}
-
-func (rs *retryStatus) ConstantBackoff() time.Duration {
-	rs.retryTimes++
-	return rs.nextBackoff
-}
-
-func initialRetryStatus(maxRetryTimes int, initialBackoff, maxBackoff time.Duration) retryStatus {
-	return retryStatus{
-		maxRetry:    maxRetryTimes,
-		maxBackoff:  maxBackoff,
-		nextBackoff: initialBackoff,
-	}
-}
-
-type regionFunc func(ctx context.Context, r *RegionInfo) rpcResult
-
-type overRegionsInRangeController struct {
+type OverRegionsInRangeController struct {
 	start      []byte
 	end        []byte
 	metaClient SplitClient
 
 	errors error
-	rs     retryStatus
+	rs     utils.RetryState
 }
 
-func overRegionsInRange(start, end []byte, metaClient SplitClient, retryStatus retryStatus) overRegionsInRangeController {
-	return overRegionsInRangeController{
+// OverRegionsInRange creates a controller that cloud be used to scan regions in a range and
+// apply a function over these regions.
+// You can then call the `Run` method for applying some functions.
+func OverRegionsInRange(start, end []byte, metaClient SplitClient, retryStatus utils.RetryState) OverRegionsInRangeController {
+	return OverRegionsInRangeController{
 		start:      start,
 		end:        end,
 		metaClient: metaClient,
@@ -72,11 +40,58 @@ func overRegionsInRange(start, end []byte, metaClient SplitClient, retryStatus r
 	}
 }
 
-func (o *overRegionsInRangeController) OnError(ctx context.Context, result rpcResult, region *RegionInfo) {
+func (o *OverRegionsInRangeController) onError(ctx context.Context, result RPCResult, region *RegionInfo) {
 	o.errors = multierr.Append(o.errors, errors.Annotatef(&result, "execute over region %v failed", region.Region))
+	// TODO: Maybe handle some of region errors like `epoch not match`?
 }
 
-func (o *overRegionsInRangeController) Run(ctx context.Context, f regionFunc) error {
+func (o *OverRegionsInRangeController) tryFindLeader(ctx context.Context, regionId uint64) (*metapb.Peer, error) {
+	var leader *metapb.Peer
+	leaderRs := utils.InitialRetryState(4, 5*time.Second, 10*time.Second)
+	err := utils.WithRetry(ctx, func() error {
+		r, err := o.metaClient.GetRegionByID(ctx, regionId)
+		if err != nil {
+			return err
+		}
+		if r.Leader != nil {
+			leader = r.Leader
+			return nil
+		}
+		return errors.Annotatef(berrors.ErrPDLeaderNotFound, "there is no leader for region %d", regionId)
+	}, &leaderRs)
+	if err != nil {
+		return nil, err
+	}
+	return leader, nil
+}
+
+// handleInRegionError handles the error happens internal in the region. Update the region info, and perform a suitable backoff.
+func (o *OverRegionsInRangeController) handleInRegionError(ctx context.Context, result RPCResult, region *RegionInfo) {
+	if nl := result.StoreError.GetNotLeader(); nl != nil {
+		if nl.Leader != nil {
+			region.Leader = nl.Leader
+			// try the new leader immediately.
+			return
+		}
+		// we retry manually, simply record the retry event.
+		o.rs.RecordRetry()
+		// There may not be leader, waiting...
+		leader, err := o.tryFindLeader(ctx, region.Region.Id)
+		if err != nil {
+			// Leave the region info unchanged, let it retry then.
+			logutil.CL(ctx).Warn("failed to find leader", logutil.Region(region.Region), logutil.ShortError(err))
+			return
+		}
+		region.Leader = leader
+		return
+	}
+	// For other errors, like `ServerIsBusy`, `RegionIsNotInitialized`, just trivially backoff.
+	time.Sleep(o.rs.ExponentialBackoff())
+}
+
+// Run executes the `regionFunc` over the regions in `o.start` and `o.end`.
+// It would retry the errors accroding to the `rpcResponse`.
+func (o *OverRegionsInRangeController) Run(ctx context.Context, f RegionFunc) error {
 	if !o.rs.ShouldRetry() {
 		return o.errors
 	}
@@ -97,44 +112,59 @@ func (o *overRegionsInRangeController) Run(ctx context.Context, f regionFunc) er
 	)
 
 	for _, region := range regionInfos {
-		result := f(lctx, region)
-
-		if !result.OK() {
-			o.OnError(ctx, result, region)
-			switch result.StrategyForRetry() {
-			case giveUp:
-				logutil.CL(ctx).Warn("unexpected error, should stop to retry", logutil.ShortError(&result), logutil.Region(region.Region))
-				return o.errors
-			case fromThisRegion:
-				logutil.CL(ctx).Warn("retry for region", logutil.Region(region.Region), logutil.ShortError(&result))
-				time.Sleep(o.rs.ExponentialBackoff())
-				continue
-			case fromStart:
-				logutil.CL(ctx).Warn("retry for execution over regions", logutil.ShortError(&result))
-				// TODO: make a backoffer considering more about the error info,
-				//       instead of ingore the result and retry.
-				time.Sleep(o.rs.ExponentialBackoff())
-				return o.Run(ctx, f)
-			}
+		cont, err := o.runInRegion(lctx, f, region)
+		if err != nil {
+			return err
+		}
+		if !cont {
+			return nil
 		}
 	}
 	return nil
 }
 
-// rpcResult is the result after executing some RPCs to TiKV.
-type rpcResult struct {
+// runInRegion executes the function in the region, and returns `cont = false` if no need for trying for next region.
+func (o *OverRegionsInRangeController) runInRegion(ctx context.Context, f RegionFunc, region *RegionInfo) (cont bool, err error) {
+	if !o.rs.ShouldRetry() {
+		return false, o.errors
+	}
+	result := f(ctx, region)
+
+	if !result.OK() {
+		o.onError(ctx, result, region)
+		switch result.StrategyForRetry() {
+		case giveUp:
+			logutil.CL(ctx).Warn("unexpected error, should stop to retry", logutil.ShortError(&result), logutil.Region(region.Region))
+			return false, o.errors
+		case fromThisRegion:
+			logutil.CL(ctx).Warn("retry for region", logutil.Region(region.Region), logutil.ShortError(&result))
+			o.handleInRegionError(ctx, result, region)
+			return o.runInRegion(ctx, f, region)
+		case fromStart:
+			logutil.CL(ctx).Warn("retry for execution over regions", logutil.ShortError(&result))
+			// TODO: make a backoffer considering more about the error info,
+			//       instead of ingore the result and retry.
+			time.Sleep(o.rs.ExponentialBackoff())
+			return false, o.Run(ctx, f)
+		}
+	}
+	return true, nil
+}
+
+// RPCResult is the result after executing some RPCs to TiKV.
+type RPCResult struct {
 	Err        error
 	StoreError *errorpb.Error
 }
 
-func rpcResultFromError(err error) rpcResult {
-	return rpcResult{
+func RPCResultFromError(err error) RPCResult {
+	return RPCResult{
 		Err: err,
 	}
 }
 
-func rpcResultOK() rpcResult {
-	return rpcResult{}
+func RPCResultOK() RPCResult {
+	return RPCResult{}
 }
 
 type retryStrategy int
@@ -145,28 +175,28 @@ const (
 	fromStart
 )
 
-func (r *rpcResult) StrategyForRetry() retryStrategy {
+func (r *RPCResult) StrategyForRetry() retryStrategy {
 	if r.Err != nil {
 		return r.StrategyForRetryGoError()
 	}
 	return r.StrategyForRetryStoreError()
 }
 
-func (r *rpcResult) StrategyForRetryStoreError() retryStrategy {
+func (r *RPCResult) StrategyForRetryStoreError() retryStrategy {
 	if r.StoreError == nil {
 		return giveUp
 	}
 
 	if r.StoreError.GetServerIsBusy() != nil ||
-		r.StoreError.GetNotLeader() != nil ||
-		r.StoreError.GetRegionNotFound() != nil {
+		r.StoreError.GetRegionNotInitialized() != nil ||
+		r.StoreError.GetNotLeader() != nil {
 		return fromThisRegion
 	}
 
 	return fromStart
 }
 
-func (r *rpcResult) StrategyForRetryGoError() retryStrategy {
+func (r *RPCResult) StrategyForRetryGoError() retryStrategy {
 	if r.Err == nil {
 		return giveUp
 	}
@@ -181,7 +211,7 @@ func (r *rpcResult) StrategyForRetryGoError() retryStrategy {
 	return giveUp
 }
 
-func (r *rpcResult) Error() string {
+func (r *RPCResult) Error() string {
 	if r.Err != nil {
 		return r.Err.Error()
 	}
@@ -191,6 +221,6 @@ func (r *rpcResult) Error() string {
 	return "<no error>"
 }
 
-func (r *rpcResult) OK() bool {
+func (r *RPCResult) OK() bool {
 	return r.Err == nil && r.StoreError == nil
 }
