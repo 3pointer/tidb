@@ -157,6 +157,12 @@ type RPCResult struct {
 	StoreError *errorpb.Error
 }
 
+func RPCResultFromPBError(err *errorpb.Error) RPCResult {
+	return RPCResult{
+		StoreError: err,
+	}
+}
+
 func RPCResultFromError(err error) RPCResult {
 	return RPCResult{
 		Err: err,

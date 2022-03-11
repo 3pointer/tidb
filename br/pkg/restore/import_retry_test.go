@@ -171,7 +171,7 @@ func TestEpochNotMatch(t *testing.T) {
 		if !isSecondRun && r.Region.Id == left.Region.Id {
 			mergeRegion()
 			isSecondRun = true
-			return restore.RPCResult{StoreError: epochNotMatch}
+			return restore.RPCResultFromPBError(epochNotMatch)
 		}
 		if isSecondRun {
 			secondRunRegions = append(secondRunRegions, r)
@@ -247,7 +247,7 @@ func TestRegionSplit(t *testing.T) {
 		if !isSecondRun && r.Region.Id == target.Region.Id {
 			splitRegion()
 			isSecondRun = true
-			return restore.RPCResult{StoreError: epochNotMatch}
+			return restore.RPCResultFromPBError(epochNotMatch)
 		}
 		if isSecondRun {
 			secondRunRegions = append(secondRunRegions, r)
