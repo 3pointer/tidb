@@ -90,7 +90,7 @@ func (o *OverRegionsInRangeController) handleInRegionError(ctx context.Context, 
 }
 
 // Run executes the `regionFunc` over the regions in `o.start` and `o.end`.
-// It would retry the errors accroding to the `rpcResponse`.
+// It would retry the errors according to the `rpcResponse`.
 func (o *OverRegionsInRangeController) Run(ctx context.Context, f RegionFunc) error {
 	if !o.rs.ShouldRetry() {
 		return o.errors
