@@ -40,8 +40,6 @@ func assertRegions(t *testing.T, regions []*restore.RegionInfo, keys ...string) 
 }
 
 func TestScanSuccess(t *testing.T) {
-	t.Parallel()
-
 	// region: [, aay), [aay, bba), [bba, bbh), [bbh, cca), [cca, )
 	cli := initTestClient()
 	rs := utils.InitialRetryState(1, 0, 0)
@@ -72,8 +70,6 @@ func TestScanSuccess(t *testing.T) {
 }
 
 func TestNotLeader(t *testing.T) {
-	t.Parallel()
-
 	// region: [, aay), [aay, bba), [bba, bbh), [bbh, cca), [cca, )
 	cli := initTestClient()
 	rs := utils.InitialRetryState(1, 0, 0)
@@ -130,8 +126,6 @@ func printPDRegion(name string, infos []*pdtypes.Region) {
 }
 
 func TestEpochNotMatch(t *testing.T) {
-	t.Parallel()
-
 	// region: [, aay), [aay, bba), [bba, bbh), [bbh, cca), [cca, )
 	cli := initTestClient()
 	rs := utils.InitialRetryState(2, 0, 0)
@@ -189,8 +183,6 @@ func TestEpochNotMatch(t *testing.T) {
 }
 
 func TestRegionSplit(t *testing.T) {
-	t.Parallel()
-
 	// region: [, aay), [aay, bba), [bba, bbh), [bbh, cca), [cca, )
 	cli := initTestClient()
 	rs := utils.InitialRetryState(2, 0, 0)
