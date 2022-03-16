@@ -811,7 +811,7 @@ func (importer *FileImporter) downloadAndApplyKVFile(
 	}
 	if resp.GetError() != nil {
 		logutil.CL(ctx).Warn("backup meet error", zap.Stringer("error", resp.GetError()))
-		return RPCResultFromPBError(resp.GetError().GetStoreError())
+		return RPCResultFromPBError(resp.GetError())
 	}
 	return RPCResultOK()
 }

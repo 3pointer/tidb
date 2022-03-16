@@ -8,6 +8,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/errorpb"
+	"github.com/pingcap/kvproto/pkg/import_sstpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	berrors "github.com/pingcap/tidb/br/pkg/errors"
 	"github.com/pingcap/tidb/br/pkg/logutil"
@@ -153,13 +154,16 @@ func (o *OverRegionsInRangeController) runInRegion(ctx context.Context, f Region
 
 // RPCResult is the result after executing some RPCs to TiKV.
 type RPCResult struct {
-	Err        error
-	StoreError *errorpb.Error
+	Err error
+
+	ImportError string
+	StoreError  *errorpb.Error
 }
 
-func RPCResultFromPBError(err *errorpb.Error) RPCResult {
+func RPCResultFromPBError(err *import_sstpb.Error) RPCResult {
 	return RPCResult{
-		StoreError: err,
+		ImportError: err.GetMessage(),
+		StoreError:  err.GetStoreError(),
 	}
 }
 
@@ -228,5 +232,5 @@ func (r *RPCResult) Error() string {
 }
 
 func (r *RPCResult) OK() bool {
-	return r.Err == nil && r.StoreError == nil
+	return r.Err == nil && r.ImportError == "" && r.StoreError == nil
 }
