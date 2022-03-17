@@ -97,6 +97,7 @@ func (o *OverRegionsInRangeController) handleInRegionError(ctx context.Context, 
 	}
 	// For other errors, like `ServerIsBusy`, `RegionIsNotInitialized`, just trivially backoff.
 	time.Sleep(o.rs.ExponentialBackoff())
+	return true
 }
 
 // Run executes the `regionFunc` over the regions in `o.start` and `o.end`.

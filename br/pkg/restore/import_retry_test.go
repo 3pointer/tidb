@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/errorpb"
+	"github.com/pingcap/kvproto/pkg/import_sstpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/tidb/br/pkg/restore"
 	"github.com/pingcap/tidb/br/pkg/utils"
@@ -153,11 +154,13 @@ func TestEpochNotMatch(t *testing.T) {
 		cli.regionsInfo.SetRegion(newRegion)
 		cli.regions[42] = &info
 	}
-	epochNotMatch := &errorpb.Error{
-		EpochNotMatch: &errorpb.EpochNotMatch{
-			CurrentRegions: []*metapb.Region{info.Region},
-		},
-	}
+	epochNotMatch := &import_sstpb.Error{
+		Message: "Epoch not match",
+		StoreError: &errorpb.Error{
+			EpochNotMatch: &errorpb.EpochNotMatch{
+				CurrentRegions: []*metapb.Region{info.Region},
+			},
+		}}
 	firstRunRegions := []*restore.RegionInfo{}
 	secondRunRegions := []*restore.RegionInfo{}
 	isSecondRun := false
@@ -224,14 +227,16 @@ func TestRegionSplit(t *testing.T) {
 			cli.regions[r.Region.Id] = r
 		}
 	}
-	epochNotMatch := &errorpb.Error{
-		EpochNotMatch: &errorpb.EpochNotMatch{
-			CurrentRegions: []*metapb.Region{
-				newRegions[0].Region,
-				newRegions[1].Region,
+	epochNotMatch := &import_sstpb.Error{
+		Message: "Epoch not match",
+		StoreError: &errorpb.Error{
+			EpochNotMatch: &errorpb.EpochNotMatch{
+				CurrentRegions: []*metapb.Region{
+					newRegions[0].Region,
+					newRegions[1].Region,
+				},
 			},
-		},
-	}
+		}}
 	firstRunRegions := []*restore.RegionInfo{}
 	secondRunRegions := []*restore.RegionInfo{}
 	isSecondRun := false
