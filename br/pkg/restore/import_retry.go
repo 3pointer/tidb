@@ -46,20 +46,28 @@ func (o *OverRegionsInRangeController) onError(ctx context.Context, result RPCRe
 	// TODO: Maybe handle some of region errors like `epoch not match`?
 }
 
-func (o *OverRegionsInRangeController) tryFindLeader(ctx context.Context, regionId uint64) (*metapb.Peer, error) {
+func (o *OverRegionsInRangeController) tryFindLeader(ctx context.Context, region *RegionInfo) (*metapb.Peer, error) {
 	var leader *metapb.Peer
+	failed := false
 	leaderRs := utils.InitialRetryState(4, 5*time.Second, 10*time.Second)
 	err := utils.WithRetry(ctx, func() error {
-		r, err := o.metaClient.GetRegionByID(ctx, regionId)
+		r, err := o.metaClient.GetRegionByID(ctx, region.Region.Id)
 		if err != nil {
 			return err
+		}
+		if !checkRegionEpoch(r, region) {
+			failed = true
+			return nil
 		}
 		if r.Leader != nil {
 			leader = r.Leader
 			return nil
 		}
-		return errors.Annotatef(berrors.ErrPDLeaderNotFound, "there is no leader for region %d", regionId)
+		return errors.Annotatef(berrors.ErrPDLeaderNotFound, "there is no leader for region %d", region.Region.Id)
 	}, &leaderRs)
+	if failed {
+		return nil, errors.Annotatef(berrors.ErrKVEpochNotMatch, "the current epoch of %s is changed", region)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -67,24 +75,25 @@ func (o *OverRegionsInRangeController) tryFindLeader(ctx context.Context, region
 }
 
 // handleInRegionError handles the error happens internal in the region. Update the region info, and perform a suitable backoff.
-func (o *OverRegionsInRangeController) handleInRegionError(ctx context.Context, result RPCResult, region *RegionInfo) {
+func (o *OverRegionsInRangeController) handleInRegionError(ctx context.Context, result RPCResult, region *RegionInfo) (cont bool) {
+
 	if nl := result.StoreError.GetNotLeader(); nl != nil {
 		if nl.Leader != nil {
 			region.Leader = nl.Leader
 			// try the new leader immediately.
-			return
+			return true
 		}
 		// we retry manually, simply record the retry event.
 		o.rs.RecordRetry()
 		// There may not be leader, waiting...
-		leader, err := o.tryFindLeader(ctx, region.Region.Id)
+		leader, err := o.tryFindLeader(ctx, region)
 		if err != nil {
 			// Leave the region info unchanged, let it retry then.
 			logutil.CL(ctx).Warn("failed to find leader", logutil.Region(region.Region), logutil.ShortError(err))
-			return
+			return false
 		}
 		region.Leader = leader
-		return
+		return true
 	}
 	// For other errors, like `ServerIsBusy`, `RegionIsNotInitialized`, just trivially backoff.
 	time.Sleep(o.rs.ExponentialBackoff())
@@ -139,7 +148,9 @@ func (o *OverRegionsInRangeController) runInRegion(ctx context.Context, f Region
 			return false, o.errors
 		case fromThisRegion:
 			logutil.CL(ctx).Warn("retry for region", logutil.Region(region.Region), logutil.ShortError(&result))
-			o.handleInRegionError(ctx, result, region)
+			if !o.handleInRegionError(ctx, result, region) {
+				return false, o.Run(ctx, f)
+			}
 			return o.runInRegion(ctx, f, region)
 		case fromStart:
 			logutil.CL(ctx).Warn("retry for execution over regions", logutil.ShortError(&result))
