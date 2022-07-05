@@ -382,7 +382,8 @@ func ValidateFileRewriteRule(file *backuppb.File, rewriteRules *RewriteRules) er
 			zap.Int64("tableID", tableID),
 			logutil.File(file),
 		)
-		return errors.Annotate(berrors.ErrRestoreInvalidRewrite, "cannot find rewrite rule")
+		return errors.Annotatef(berrors.ErrRestoreInvalidRewrite,
+			"cannot find rewrite rule for tableID: %d in file %s(startKey: %s)", tableID, file.Name, string(file.GetStartKey()))
 	}
 	// Check if the end key has a matched rewrite key
 	_, endRule := rewriteRawKey(file.GetEndKey(), rewriteRules)
@@ -393,7 +394,8 @@ func ValidateFileRewriteRule(file *backuppb.File, rewriteRules *RewriteRules) er
 			zap.Int64("tableID", tableID),
 			logutil.File(file),
 		)
-		return errors.Annotate(berrors.ErrRestoreInvalidRewrite, "cannot find rewrite rule")
+		return errors.Annotatef(berrors.ErrRestoreInvalidRewrite,
+			"cannot find rewrite rule for tableID: %d in file %s(endKey: %s)", tableID, file.Name, string(file.GetEndKey()))
 	}
 	// the rewrite rule of the start key and the end key should be equaled.
 	// i.e. there should only one rewrite rule for one file, a file should only be imported into one region.
