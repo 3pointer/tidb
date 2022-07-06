@@ -251,6 +251,7 @@ func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *b
 				ShortValue: valueStr,
 			}
 			ch <- kvInfo
+			log.Info("found write cf key in data file", zap.String("file", dataFile.Path))
 		} else if dataFile.Cf == defaultCFName {
 			kvInfo := &StreamKVInfo{
 				CFName:     dataFile.Cf,
@@ -260,6 +261,7 @@ func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *b
 				Value:      base64.StdEncoding.EncodeToString(v),
 			}
 			ch <- kvInfo
+			log.Info("found default cf key in data file", zap.String("file", dataFile.Path))
 		}
 	}
 
