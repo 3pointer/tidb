@@ -520,6 +520,7 @@ func RewriteFileKeys(file AppliedFile, rewriteRules *RewriteRules) (startKey, en
 				zap.Reflect("rewrite data", rewriteRules.Data))
 			startKey, rule = rewriteEncodedKey(file.GetStartKey(), rewriteRules)
 			if rule == nil {
+				log.Error("cannot find start key match table with file", zap.Any("file", file))
 				err = errors.Annotate(berrors.ErrRestoreInvalidRewrite, "cannot find rewrite rule for start key")
 				return
 			}

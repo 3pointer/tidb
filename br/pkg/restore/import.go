@@ -386,31 +386,31 @@ func (importer *FileImporter) ImportKVFiles(
 	startTS uint64,
 	restoreTS uint64,
 ) error {
-	startTime := time.Now()
+	// startTime := time.Now()
 	log.Debug("import kv files", zap.String("file", file.Path))
-	startKey, endKey, err := RewriteFileKeys(file, rule)
+	_, _, err := RewriteFileKeys(file, rule)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	log.Debug("rewrite file keys",
-		zap.String("name", file.Path),
-		logutil.Key("startKey", startKey),
-		logutil.Key("endKey", endKey))
+	// log.Debug("rewrite file keys",
+	// 	zap.String("name", file.Path),
+	// 	logutil.Key("startKey", startKey),
+	// 	logutil.Key("endKey", endKey))
 
-	// This RetryState will retry 48 time, for 5 min - 6 min.
-	rs := utils.InitialRetryState(48, 100*time.Millisecond, 8*time.Second)
-	ctl := OverRegionsInRange(startKey, endKey, importer.metaClient, &rs)
-	err = ctl.Run(ctx, func(ctx context.Context, r *RegionInfo) RPCResult {
-		return importer.ImportKVFileForRegion(ctx, file, rule, startTS, restoreTS, r)
-	})
+	// // This RetryState will retry 48 time, for 5 min - 6 min.
+	// rs := utils.InitialRetryState(48, 100*time.Millisecond, 8*time.Second)
+	// ctl := OverRegionsInRange(startKey, endKey, importer.metaClient, &rs)
+	// err = ctl.Run(ctx, func(ctx context.Context, r *RegionInfo) RPCResult {
+	// 	return importer.ImportKVFileForRegion(ctx, file, rule, startTS, restoreTS, r)
+	// })
 
-	log.Debug("download and apply file done",
-		zap.String("file", file.Path),
-		zap.Stringer("take", time.Since(startTime)),
-		logutil.Key("fileStart", file.StartKey),
-		logutil.Key("fileEnd", file.EndKey),
-	)
+	// log.Debug("download and apply file done",
+	// 	zap.String("file", file.Path),
+	// 	zap.Stringer("take", time.Since(startTime)),
+	// 	logutil.Key("fileStart", file.StartKey),
+	// 	logutil.Key("fileEnd", file.EndKey),
+	// )
 	return errors.Trace(err)
 }
 
