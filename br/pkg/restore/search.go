@@ -217,6 +217,8 @@ func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *b
 		k, v := iter.Key(), iter.Value()
 		if !s.comparator.Compare(k, s.searchKey) {
 			continue
+		} else {
+			log.Info("find it!", zap.String("file", dataFile.Path))
 		}
 
 		_, ts, err := codec.DecodeUintDesc(k[len(k)-8:])
