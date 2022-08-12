@@ -507,7 +507,7 @@ func findMatchedRewriteRule(file AppliedFile, rules *RewriteRules) *import_sstpb
 // RewriteFileKeys tries to choose and apply the rewrite rules to the file.
 // This method would try to detach whether the file key is encoded.
 // Note: Maybe add something like `GetEncodedStartKey` Or `GetRawStartkey` for `AppliedFile` for making it more determinable?
-func RewriteFileKeys(file AppliedFile, rewriteRules *RewriteRules) (startKey, endKey []byte, err error) {
+func RewriteFileKeys(file AppliedFile, rewriteRules *RewriteRules, path string) (startKey, endKey []byte, err error) {
 	startID := tablecodec.DecodeTableID(file.GetStartKey())
 	endID := tablecodec.DecodeTableID(file.GetEndKey())
 	var rule *import_sstpb.RewriteRule
@@ -515,8 +515,9 @@ func RewriteFileKeys(file AppliedFile, rewriteRules *RewriteRules) (startKey, en
 		startKey, rule = rewriteRawKey(file.GetStartKey(), rewriteRules)
 		if rewriteRules != nil && rule == nil {
 			// fall back to encoded key
-			log.Debug("cannot find rewrite rule with raw key format",
+			log.Info("cannot find rewrite rule with raw key format",
 				logutil.Key("startKey", file.GetStartKey()),
+				zap.String("path", path),
 				zap.Reflect("rewrite data", rewriteRules.Data))
 			startKey, rule = rewriteEncodedKey(file.GetStartKey(), rewriteRules)
 			if rule == nil {
