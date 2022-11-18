@@ -204,7 +204,7 @@ func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *b
 		fileLen := file.RangeLength
 		log.Info("fileInfo", zap.Uint64("so", startOffset), zap.Uint64("len", fileLen),
 			zap.Any("length", file.Length), zap.Any("entrycount", file.NumberOfEntries),
-			zap.Any("filepath", file.Path), zap.Any("fileGroupPath", dataFile.Path))
+			zap.Any("filepath", file.Path), zap.Any("fileGroupPath", dataFile.Path), zap.Any("fileSha", file.GetSha256()))
 
 		//var checksum [32]byte
 		//if checksum = sha256.Sum256(buff[startOffset:startOffset+fileLen]); !bytes.Equal(checksum[:], file.GetSha256()) {
