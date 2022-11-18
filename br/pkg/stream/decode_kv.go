@@ -16,9 +16,11 @@ package stream
 
 import (
 	"encoding/binary"
-
+	"fmt"
+	"github.com/klauspost/compress/zstd"
 	"github.com/pingcap/errors"
 	berrors "github.com/pingcap/tidb/br/pkg/errors"
+	"io"
 )
 
 // Iterator specifies a read iterator Interface.
@@ -39,9 +41,26 @@ type EventIterator struct {
 	err  error
 }
 
+func Decompress(in io.Reader, out io.Writer) error {
+	d, err := zstd.NewReader(in)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+
+	// Copy content...
+	_, err = io.Copy(out, d)
+	return err
+}
+
 // NewEventIterator creates a Iterator to read kv-event.
 func NewEventIterator(buff []byte) Iterator {
-	return &EventIterator{buff: buff}
+	decoder, _ := zstd.NewReader(nil)
+	newBuff, err := decoder.DecodeAll(buff, nil)
+	if err != nil {
+		fmt.Println("zstd err", err)
+	}
+	return &EventIterator{buff: newBuff}
 }
 
 // Next specifies the next iterative element.

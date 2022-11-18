@@ -214,7 +214,8 @@ func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *b
 		//	return errors.Annotatef(err, "validate checksum failed, file: %s", dataFile.Path)
 		//}
 		//log.Info("checksum", zap.Any("expect", file.GetSha256()), zap.Any("actual", checksum))
-		iter := stream.NewEventIterator(buff[startOffset:startOffset+fileLen])
+		iterBuf := buff[startOffset:startOffset+fileLen]
+		iter := stream.NewEventIterator(iterBuf)
 		for iter.Valid() {
 			iter.Next()
 			if err := iter.GetError(); err != nil {
