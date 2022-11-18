@@ -206,7 +206,7 @@ func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *b
 		if checksum := sha256.Sum256(buff[startOffset:startOffset+fileLen]); !bytes.Equal(checksum[:], file.GetSha256()) {
 			return errors.Annotatef(err, "validate checksum failed, file: %s", dataFile.Path)
 		}
-		iter := stream.NewEventIterator(buff)
+		iter := stream.NewEventIterator(buff[startOffset:startOffset+fileLen])
 		for iter.Valid() {
 			iter.Next()
 			if err := iter.GetError(); err != nil {
