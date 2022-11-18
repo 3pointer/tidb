@@ -190,15 +190,14 @@ func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *b
 		return errors.Annotatef(err, "read data file error, file: %s", dataFile.Path)
 	}
 
-
 	for _, file := range dataFile.DataFilesInfo {
 		// TODO dynamically configure filter policy
-		if bytes.Compare(s.searchKey, file.StartKey) < 0 {
-			continue
-		}
-		if bytes.Compare(s.searchKey, file.EndKey) > 0 {
-			continue
-		}
+		// if bytes.Compare(s.searchKey, file.StartKey) < 0 {
+		// 	continue
+		// }
+		// if bytes.Compare(s.searchKey, file.EndKey) > 0 {
+		// 	continue
+		// }
 
 		startOffset := file.RangeOffset
 		fileLen := file.RangeLength
@@ -263,9 +262,6 @@ func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *b
 		}
 
 	}
-
-
-
 
 	log.Info("finish search data file", zap.String("file", dataFile.Path))
 	return nil
