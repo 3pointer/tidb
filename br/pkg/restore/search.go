@@ -83,7 +83,7 @@ func (s *StreamBackupSearch) SetEndTs(endTs uint64) {
 	s.endTs = endTs
 }
 
-func (s *StreamBackupSearch) readDataFiles(ctx context.Context, ch chan<- *backuppb.DataFileInfo) error {
+func (s *StreamBackupSearch) readDataFiles(ctx context.Context, ch chan<- *backuppb.DataFileGroup) error {
 	opt := &storage.WalkOption{SubDir: stream.GetStreamBackupMetaPrefix()}
 	pool := utils.NewWorkerPool(64, "read backup meta")
 	eg, egCtx := errgroup.WithContext(ctx)
@@ -118,38 +118,25 @@ func (s *StreamBackupSearch) readDataFiles(ctx context.Context, ch chan<- *backu
 	return eg.Wait()
 }
 
-func (s *StreamBackupSearch) resolveMetaData(ctx context.Context, metaData *backuppb.Metadata, ch chan<- *backuppb.DataFileInfo) {
+func (s *StreamBackupSearch) resolveMetaData(ctx context.Context, metaData *backuppb.Metadata, ch chan<- *backuppb.DataFileGroup) {
 	for _, fg := range metaData.FileGroups {
-		for _, file := range fg.DataFilesInfo {
-			if file.IsMeta {
+		if s.startTs > 0 {
+			if fg.MaxTs < s.startTs {
 				continue
 			}
-			// TODO dynamically configure filter policy
-			if bytes.Compare(s.searchKey, file.StartKey) < 0 {
-				continue
-			}
-			if bytes.Compare(s.searchKey, file.EndKey) > 0 {
-				continue
-			}
-
-			if s.startTs > 0 {
-				if file.MaxTs < s.startTs {
-					continue
-				}
-			}
-			if s.endTs > 0 {
-				if file.MinTs > s.endTs {
-					continue
-				}
-			}
-			ch <- file
 		}
+		if s.endTs > 0 {
+			if fg.MinTs > s.endTs {
+				continue
+			}
+		}
+		ch <- fg
 	}
 }
 
 // Search kv entries from log data files
 func (s *StreamBackupSearch) Search(ctx context.Context) ([]*StreamKVInfo, error) {
-	dataFilesCh := make(chan *backuppb.DataFileInfo, 32)
+	dataFilesCh := make(chan *backuppb.DataFileGroup, 32)
 	entriesCh, errCh := make(chan *StreamKVInfo, 64), make(chan error, 8)
 	go func() {
 		defer close(dataFilesCh)
@@ -197,71 +184,88 @@ func (s *StreamBackupSearch) Search(ctx context.Context) ([]*StreamKVInfo, error
 	return entries, nil
 }
 
-func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *backuppb.DataFileInfo, ch chan<- *StreamKVInfo) error {
+func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *backuppb.DataFileGroup, ch chan<- *StreamKVInfo) error {
 	buff, err := s.storage.ReadFile(ctx, dataFile.Path)
 	if err != nil {
 		return errors.Annotatef(err, "read data file error, file: %s", dataFile.Path)
 	}
 
-	if checksum := sha256.Sum256(buff); !bytes.Equal(checksum[:], dataFile.GetSha256()) {
-		return errors.Annotatef(err, "validate checksum failed, file: %s", dataFile.Path)
-	}
 
-	iter := stream.NewEventIterator(buff)
-	for iter.Valid() {
-		iter.Next()
-		if err := iter.GetError(); err != nil {
-			return errors.Trace(err)
+	for _, file := range dataFile.DataFilesInfo {
+		// TODO dynamically configure filter policy
+		if bytes.Compare(s.searchKey, file.StartKey) < 0 {
+			continue
 		}
-
-		k, v := iter.Key(), iter.Value()
-		if !s.comparator.Compare(k, s.searchKey) {
+		if bytes.Compare(s.searchKey, file.EndKey) > 0 {
 			continue
 		}
 
-		_, ts, err := codec.DecodeUintDesc(k[len(k)-8:])
-		if err != nil {
-			return errors.Annotatef(err, "decode ts from key error, file: %s", dataFile.Path)
+		startOffset := file.RangeOffset
+		fileLen := file.RangeLength
+
+		if checksum := sha256.Sum256(buff[startOffset:startOffset+fileLen]); !bytes.Equal(checksum[:], file.GetSha256()) {
+			return errors.Annotatef(err, "validate checksum failed, file: %s", dataFile.Path)
+		}
+		iter := stream.NewEventIterator(buff)
+		for iter.Valid() {
+			iter.Next()
+			if err := iter.GetError(); err != nil {
+				return errors.Trace(err)
+			}
+
+			k, v := iter.Key(), iter.Value()
+			if !s.comparator.Compare(k, s.searchKey) {
+				continue
+			}
+
+			_, ts, err := codec.DecodeUintDesc(k[len(k)-8:])
+			if err != nil {
+				return errors.Annotatef(err, "decode ts from key error, file: %s", dataFile.Path)
+			}
+
+			k = k[:len(k)-8]
+			_, rawKey, err := codec.DecodeBytes(k, nil)
+			if err != nil {
+				return errors.Annotatef(err, "decode raw key error, file: %s", dataFile.Path)
+			}
+
+			if file.Cf == writeCFName {
+				rawWriteCFValue := new(stream.RawWriteCFValue)
+				if err := rawWriteCFValue.ParseFrom(v); err != nil {
+					return errors.Annotatef(err, "parse raw write cf value error, file: %s", dataFile.Path)
+				}
+
+				valueStr := ""
+				if rawWriteCFValue.HasShortValue() {
+					valueStr = base64.StdEncoding.EncodeToString(rawWriteCFValue.GetShortValue())
+				}
+
+				kvInfo := &StreamKVInfo{
+					WriteType:  rawWriteCFValue.GetWriteType(),
+					CFName:     file.Cf,
+					CommitTs:   ts,
+					StartTs:    rawWriteCFValue.GetStartTs(),
+					Key:        strings.ToUpper(hex.EncodeToString(rawKey)),
+					EncodedKey: hex.EncodeToString(iter.Key()),
+					ShortValue: valueStr,
+				}
+				ch <- kvInfo
+			} else if file.Cf == defaultCFName {
+				kvInfo := &StreamKVInfo{
+					CFName:     file.Cf,
+					StartTs:    ts,
+					Key:        strings.ToUpper(hex.EncodeToString(rawKey)),
+					EncodedKey: hex.EncodeToString(iter.Key()),
+					Value:      base64.StdEncoding.EncodeToString(v),
+				}
+				ch <- kvInfo
+			}
 		}
 
-		k = k[:len(k)-8]
-		_, rawKey, err := codec.DecodeBytes(k, nil)
-		if err != nil {
-			return errors.Annotatef(err, "decode raw key error, file: %s", dataFile.Path)
-		}
-
-		if dataFile.Cf == writeCFName {
-			rawWriteCFValue := new(stream.RawWriteCFValue)
-			if err := rawWriteCFValue.ParseFrom(v); err != nil {
-				return errors.Annotatef(err, "parse raw write cf value error, file: %s", dataFile.Path)
-			}
-
-			valueStr := ""
-			if rawWriteCFValue.HasShortValue() {
-				valueStr = base64.StdEncoding.EncodeToString(rawWriteCFValue.GetShortValue())
-			}
-
-			kvInfo := &StreamKVInfo{
-				WriteType:  rawWriteCFValue.GetWriteType(),
-				CFName:     dataFile.Cf,
-				CommitTs:   ts,
-				StartTs:    rawWriteCFValue.GetStartTs(),
-				Key:        strings.ToUpper(hex.EncodeToString(rawKey)),
-				EncodedKey: hex.EncodeToString(iter.Key()),
-				ShortValue: valueStr,
-			}
-			ch <- kvInfo
-		} else if dataFile.Cf == defaultCFName {
-			kvInfo := &StreamKVInfo{
-				CFName:     dataFile.Cf,
-				StartTs:    ts,
-				Key:        strings.ToUpper(hex.EncodeToString(rawKey)),
-				EncodedKey: hex.EncodeToString(iter.Key()),
-				Value:      base64.StdEncoding.EncodeToString(v),
-			}
-			ch <- kvInfo
-		}
 	}
+
+
+
 
 	log.Info("finish search data file", zap.String("file", dataFile.Path))
 	return nil
