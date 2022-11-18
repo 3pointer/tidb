@@ -154,6 +154,7 @@ func (s *StreamBackupSearch) Search(ctx context.Context) ([]*StreamKVInfo, error
 		pool.Apply(func() {
 			defer wg.Done()
 			if err := s.searchFromDataFile(ctx, file, entriesCh); err != nil {
+				log.Warn("search err", zap.Error(err))
 				errCh <- err
 			}
 		})
@@ -166,6 +167,7 @@ func (s *StreamBackupSearch) Search(ctx context.Context) ([]*StreamKVInfo, error
 	}()
 
 	for err := range errCh {
+		log.Warn("err", zap.Error(err))
 		return nil, errors.Trace(err)
 	}
 
