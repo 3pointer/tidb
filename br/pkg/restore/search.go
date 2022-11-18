@@ -199,6 +199,9 @@ func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *b
 		// if bytes.Compare(s.searchKey, file.EndKey) > 0 {
 		// 	continue
 		// }
+		if file.IsMeta {
+			continue
+		}
 
 		startOffset := file.RangeOffset
 		fileLen := file.RangeLength
