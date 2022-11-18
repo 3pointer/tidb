@@ -119,31 +119,31 @@ func (s *StreamBackupSearch) readDataFiles(ctx context.Context, ch chan<- *backu
 }
 
 func (s *StreamBackupSearch) resolveMetaData(ctx context.Context, metaData *backuppb.Metadata, ch chan<- *backuppb.DataFileInfo) {
-	for _, file := range metaData.Files {
-		if file.IsMeta {
-			continue
-		}
-
-		// TODO dynamically configure filter policy
-		if bytes.Compare(s.searchKey, file.StartKey) < 0 {
-			continue
-		}
-		if bytes.Compare(s.searchKey, file.EndKey) > 0 {
-			continue
-		}
-
-		if s.startTs > 0 {
-			if file.MaxTs < s.startTs {
+	for _, fg := range metaData.FileGroups {
+		for _, file := range fg.DataFilesInfo {
+			if file.IsMeta {
 				continue
 			}
-		}
-		if s.endTs > 0 {
-			if file.MinTs > s.endTs {
+			// TODO dynamically configure filter policy
+			if bytes.Compare(s.searchKey, file.StartKey) < 0 {
 				continue
 			}
-		}
+			if bytes.Compare(s.searchKey, file.EndKey) > 0 {
+				continue
+			}
 
-		ch <- file
+			if s.startTs > 0 {
+				if file.MaxTs < s.startTs {
+					continue
+				}
+			}
+			if s.endTs > 0 {
+				if file.MinTs > s.endTs {
+					continue
+				}
+			}
+			ch <- file
+		}
 	}
 }
 
