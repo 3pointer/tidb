@@ -201,6 +201,7 @@ func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *b
 
 		startOffset := file.RangeOffset
 		fileLen := file.RangeLength
+		log.Info("file", zap.Uint64("so", startOffset), zap.Uint64("len", fileLen))
 
 		if checksum := sha256.Sum256(buff[startOffset:startOffset+fileLen]); !bytes.Equal(checksum[:], file.GetSha256()) {
 			return errors.Annotatef(err, "validate checksum failed, file: %s", dataFile.Path)
@@ -262,8 +263,7 @@ func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *b
 		}
 
 	}
-
-	log.Info("finish search data file", zap.String("file", dataFile.Path))
+	log.Info("finish search data file", zap.String("filegroup", dataFile.Path))
 	return nil
 }
 
