@@ -5,7 +5,6 @@ package restore
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"sort"
@@ -203,15 +202,15 @@ func (s *StreamBackupSearch) searchFromDataFile(ctx context.Context, dataFile *b
 
 		startOffset := file.RangeOffset
 		fileLen := file.RangeLength
-		log.Info("file", zap.Uint64("so", startOffset), zap.Uint64("len", fileLen),
+		log.Info("fileInfo", zap.Uint64("so", startOffset), zap.Uint64("len", fileLen),
 			zap.Any("length", file.Length), zap.Any("entrycount", file.NumberOfEntries),
 			zap.Any("filepath", file.Path), zap.Any("fileGroupPath", dataFile.Path))
 
-		var checksum [32]byte
-		if checksum = sha256.Sum256(buff[startOffset:startOffset+fileLen]); !bytes.Equal(checksum[:], file.GetSha256()) {
-			return errors.Annotatef(err, "validate checksum failed, file: %s", dataFile.Path)
-		}
-		log.Info("checksum", zap.Any("expect", file.GetSha256()), zap.Any("actual", checksum))
+		//var checksum [32]byte
+		//if checksum = sha256.Sum256(buff[startOffset:startOffset+fileLen]); !bytes.Equal(checksum[:], file.GetSha256()) {
+		//	return errors.Annotatef(err, "validate checksum failed, file: %s", dataFile.Path)
+		//}
+		//log.Info("checksum", zap.Any("expect", file.GetSha256()), zap.Any("actual", checksum))
 		iter := stream.NewEventIterator(buff[startOffset:startOffset+fileLen])
 		for iter.Valid() {
 			iter.Next()
