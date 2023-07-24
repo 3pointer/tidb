@@ -90,9 +90,9 @@ const (
 type BackupContext struct {
 	Concurrency      uint
 	ReplicaReadLabel map[string]string
-	MetaWriter       *metautil.MetaWriter
 	UniqueIdStoreMap *sync.Map
 
+	MetaWriterCallBack func(*rtree.Range) error
 	ProgressCallBack   func(ProgressUnit)
 	CheckpointCallBack func(*backuppb.BackupResponse) error
 }
@@ -989,13 +989,8 @@ func (bc *Client) BackupRange(
 			summary.CollectSuccessUnit(summary.TotalKV, 1, f.TotalKvs)
 			summary.CollectSuccessUnit(summary.TotalBytes, 1, f.TotalBytes)
 		}
-		// we need keep the files in order after we support multi_ingest sst.
-		// default_sst and write_sst need to be together.
-		if err := backupCtx.MetaWriter.Send(r.Files, metautil.AppendDataFile); err != nil {
-			ascendErr = err
-			return false
-		}
-		return true
+		ascendErr = backupCtx.MetaWriterCallBack(r)
+		return ascendErr == nil
 	})
 	if ascendErr != nil {
 		return errors.Trace(ascendErr)
