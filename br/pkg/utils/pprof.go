@@ -5,6 +5,7 @@ package utils
 import (
 	"fmt"
 	"net" //nolint:goimports
+
 	// #nosec
 	// register HTTP handler for /debug/pprof
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/pingcap/log"
 	berrors "github.com/pingcap/tidb/br/pkg/errors"
 	tidbutils "github.com/pingcap/tidb/util"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
@@ -57,7 +59,10 @@ func StartPProfListener(statusAddr string, wrapper *tidbutils.TLS) error {
 	}
 
 	go func() {
-		if e := http.Serve(wrapper.WrapListener(listener), nil); e != nil {
+		router := http.NewServeMux()
+		router.Handle("/metrics", promhttp.Handler())
+
+		if e := http.Serve(wrapper.WrapListener(listener), router); e != nil {
 			log.Warn("failed to serve pprof", zap.String("addr", startedPProf), zap.Error(e))
 			mu.Lock()
 			startedPProf = ""
