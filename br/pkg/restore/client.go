@@ -774,7 +774,6 @@ func (rc *Client) GoCreateTables(
 
 	if rc.batchDdlSize > minBatchDdlSize && len(rc.dbPool) > 0 {
 		err = rc.createTablesInWorkerPool(ctx, dom, tables, newTS, outCh)
-
 		if err == nil {
 			defer log.Debug("all tables are created")
 			outCh.Close()
@@ -1468,7 +1467,7 @@ func (rc *Client) execChecksum(
 func (rc *Client) GoUpdateMetaAndLoadStats(ctx context.Context, inCh *utils.PipelineChannel[*CreatedTable]) *utils.PipelineChannel[*CreatedTable] {
 	log.Info("Start to update meta then load stats")
 	outCh := DefaultOutputTableChan("stats")
-	workers := utils.NewWorkerPool(16, "UpdateStats")
+	workers := utils.NewWorkerPool(1, "UpdateStats")
 
 	go concurrentHandleTablesCh(ctx, inCh, outCh, workers, func(c context.Context, tbl *CreatedTable) error {
 		oldTable := tbl.OldTable
