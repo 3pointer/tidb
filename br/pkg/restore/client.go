@@ -294,6 +294,10 @@ func (rc *Client) GetDomain() *domain.Domain {
 	return rc.dom
 }
 
+func (rc *Client) GetRestoreStoreCount() int {
+	return len(rc.restoreStores)
+}
+
 // GetPDClient returns a pd client.
 func (rc *Client) GetPDClient() pd.Client {
 	return rc.pdClient
