@@ -253,6 +253,10 @@ func (rc *Client) allocTableIDs(ctx context.Context, tables []*metautil.Table) e
 	return nil
 }
 
+func (rc *Client) GetRestoreStoreCount() int {
+	return len(rc.restoreStores)
+}
+
 // SetPlacementPolicyMode to policy mode.
 func (rc *Client) SetPlacementPolicyMode(withPlacementPolicy string) {
 	switch strings.ToUpper(withPlacementPolicy) {
