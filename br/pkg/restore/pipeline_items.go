@@ -240,6 +240,7 @@ func NewTiKVSender(
 ) (BatchSender, error) {
 	inCh := make(chan DrainResult, defaultChannelSize)
 	midCh := make(chan drainResultAndDone, defaultChannelSize)
+	outCh := make(chan drainResultAndDone, defaultChannelSize)
 
 	sender := &tikvSender{
 		client:       cli,
@@ -251,7 +252,8 @@ func NewTiKVSender(
 
 	sender.wg.Add(2)
 	go sender.splitWorker(ctx, inCh, midCh, splitConcurrency)
-	go sender.restoreWorker(ctx, midCh)
+	go sender.holdWorker(ctx, midCh, outCh)
+	go sender.restoreWorker(ctx, outCh)
 	return sender, nil
 }
 
@@ -264,6 +266,22 @@ func (b *tikvSender) Close() {
 type drainResultAndDone struct {
 	result DrainResult
 	done   func()
+}
+
+func (b *tikvSender) holdWorker(ctx context.Context,
+	inCh <-chan drainResultAndDone,
+	outCh chan<- drainResultAndDone,
+) {
+	defer close(outCh)
+	res := make([]drainResultAndDone, 0, 20480)
+	for dr := range inCh {
+		res = append(res, dr)
+	}
+
+	for _, dr := range res {
+		outCh <- dr
+	}
+
 }
 
 func (b *tikvSender) splitWorker(ctx context.Context,
@@ -379,6 +397,7 @@ func (b *tikvSender) restoreWorker(ctx context.Context, ranges <-chan drainResul
 			if !ok {
 				return
 			}
+
 			files := r.result.Files()
 			// There has been a worker in the `RestoreSSTFiles` procedure.
 			// Spawning a raw goroutine won't make too many requests to TiKV.

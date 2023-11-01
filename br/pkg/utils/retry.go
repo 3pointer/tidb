@@ -10,10 +10,12 @@ import (
 
 	"github.com/cznic/mathutil"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 	tmysql "github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/parser/terror"
 	"github.com/tikv/client-go/v2/tikv"
 	"go.uber.org/multierr"
+	"go.uber.org/zap"
 )
 
 var retryableServerError = []string{
@@ -78,6 +80,7 @@ func WithRetryV2[T any](
 		if err == nil {
 			return res, nil
 		}
+		log.Info("enter retry", zap.Error(err))
 		allErrors = multierr.Append(allErrors, err)
 		select {
 		case <-ctx.Done():
