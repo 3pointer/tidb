@@ -4,6 +4,7 @@ package task
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 
@@ -702,11 +703,13 @@ func runRestore(c context.Context, g glue.Glue, cmdName string, cfg *RestoreConf
 		})
 	}
 
+	blockTableStream := GoBlockCreateTablesPipeline(ctx, 1024, tableStream)
+
 	tableFileMap := restore.MapTableToFiles(files)
 	log.Debug("mapped table to files", zap.Any("result map", tableFileMap))
 
 	rangeStream := restore.GoValidateFileRanges(
-		ctx, tableStream, tableFileMap, mergeRegionSize, mergeRegionCount, errCh)
+		ctx, blockTableStream, tableFileMap, mergeRegionSize, mergeRegionCount, errCh)
 
 	rangeSize := restore.EstimateRangeSize(files)
 	summary.CollectInt("restore ranges", rangeSize)
@@ -956,4 +959,25 @@ func restoreTableStream(
 			batcher.Add(t)
 		}
 	}
+}
+
+func GoBlockCreateTablesPipeline(ctx context.Context, sz int, inCh <-chan restore.CreatedTable) <-chan restore.CreatedTable {
+	outCh := make(chan restore.CreatedTable, sz)
+
+	go func() {
+		defer close(outCh)
+		cachedTables := make([]restore.CreatedTable, 0, sz)
+		for tbl := range inCh {
+			cachedTables = append(cachedTables, tbl)
+		}
+
+		sort.Slice(cachedTables, func(a, b int) bool {
+			return cachedTables[a].Table.ID < cachedTables[b].Table.ID
+		})
+
+		for _, tbl := range cachedTables {
+			outCh <- tbl
+		}
+	}()
+	return outCh
 }

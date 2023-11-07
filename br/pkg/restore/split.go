@@ -32,9 +32,10 @@ type retryTimeKey struct{}
 var retryTimes = new(retryTimeKey)
 
 type SplitContext struct {
-	isRawKv    bool
-	storeCount int
-	onSplit    OnSplitFunc
+	isRawKv     bool
+	needScatter bool
+	storeCount  int
+	onSplit     OnSplitFunc
 }
 
 // RegionSplitter is a executor of region split by rules.
@@ -87,9 +88,10 @@ func (rs *RegionSplitter) ExecuteSplit(
 		sortedKeys = append(sortedKeys, r.EndKey)
 	}
 	sctx := SplitContext{
-		isRawKv:    isRawKv,
-		onSplit:    onSplit,
-		storeCount: storeCount,
+		isRawKv:     isRawKv,
+		needScatter: true,
+		onSplit:     onSplit,
+		storeCount:  storeCount,
 	}
 	return rs.executeSplitByKeys(ctx, sctx, sortedKeys)
 }
@@ -119,7 +121,10 @@ func (rs *RegionSplitter) executeSplitByKeys(
 			regionMap[region.Region.GetId()] = region
 		}
 		for regionID, keys := range splitKeyMap {
-			log.Info("get split keys for region", zap.Int("len", len(keys)), zap.Uint64("region", regionID))
+			log.Info("get split keys for region",
+				zap.Int("len", len(keys)),
+				zap.Uint64("region", regionID),
+				zap.Bool("need scatter", splitContext.needScatter))
 			var newRegions []*split.RegionInfo
 			region := regionMap[regionID]
 			log.Info("split regions", logutil.Region(region.Region), logutil.Keys(keys))
@@ -137,13 +142,15 @@ func (rs *RegionSplitter) executeSplitByKeys(
 				}
 				return err
 			}
-			log.Info("scattered regions", zap.Int("count", len(newRegions)))
 			if len(newRegions) != len(keys) {
 				log.Warn("split key count and new region count mismatch",
 					zap.Int("new region count", len(newRegions)),
 					zap.Int("split key count", len(keys)))
 			}
-			scatterRegions = append(scatterRegions, newRegions...)
+			if splitContext.needScatter {
+				log.Info("scattered regions", zap.Int("count", len(newRegions)))
+				scatterRegions = append(scatterRegions, newRegions...)
+			}
 			splitContext.onSplit(keys)
 		}
 		return nil
@@ -160,16 +167,16 @@ func (rs *RegionSplitter) executeSplitByKeys(
 func (rs *RegionSplitter) splitAndScatterRegions(
 	ctx context.Context, splitContext SplitContext, regionInfo *split.RegionInfo, keys [][]byte,
 ) ([]*split.RegionInfo, error) {
-	if len(keys) == 0 {
+	if len(keys) <= 12 {
 		return []*split.RegionInfo{regionInfo}, nil
 	}
 
 	// keys are sorted
 	storeCount := splitContext.storeCount
-	if len(keys) >= 1024 && storeCount > 3 {
+	if splitContext.needScatter && len(keys) >= 256 && storeCount > 3 {
 		// pick keys by store
 		// the max interval should be 100
-		interval := mathutil.Max(100, len(keys)*1.0/storeCount)
+		interval := mathutil.Max(12, len(keys)*1.0/storeCount)
 		pickKeys := make([][]byte, 0, len(keys)/interval)
 		i := interval
 		for ; i < len(keys); i += interval {
@@ -179,17 +186,25 @@ func (rs *RegionSplitter) splitAndScatterRegions(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		// scatter these pick keys first
-		// assumption: pick keys would be too much
-		// so we could wait these regions scattered.
+		// // scatter these pick keys first
+		// // assumption: pick keys would be too much
+		// // so we could wait these regions scattered.
+		// rs.ScatterRegionsSync(ctx, newPickRegions)
+		// return nil, rs.executeSplitByKeys(ctx, splitContext, keys)
+		// just scatter these pick regions
+		log.Info("new pick region split", zap.Int("newPickRegions", len(newPickRegions)))
 		rs.ScatterRegionsSync(ctx, newPickRegions)
+		// assume the pick region have scattered and just split remain regions on store.
+		splitContext.needScatter = false
 		return nil, rs.executeSplitByKeys(ctx, splitContext, keys)
 	}
 	newRegions, err := rs.splitRegionsSync(ctx, regionInfo, keys)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	rs.ScatterRegionsAsync(ctx, newRegions)
+	if splitContext.needScatter {
+		rs.ScatterRegionsAsync(ctx, newRegions)
+	}
 	return newRegions, nil
 }
 
