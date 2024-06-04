@@ -36,9 +36,9 @@ import (
 	driver "github.com/pingcap/tidb/pkg/types/parser_driver"
 	"github.com/pingcap/tidb/pkg/util/chunk"
 	"github.com/pingcap/tidb/pkg/util/collate"
+	"github.com/pingcap/tidb/pkg/util/intset"
 	"github.com/pingcap/tidb/pkg/util/logutil"
 	"go.uber.org/zap"
-	"golang.org/x/tools/container/intsets"
 )
 
 // cowExprRef is a copy-on-write slice ref util using in `ColumnSubstitute`
@@ -372,15 +372,15 @@ func ExtractColumnsAndCorColumnsFromExpressions(result []*Column, list []Express
 }
 
 // ExtractColumnSet extracts the different values of `UniqueId` for columns in expressions.
-func ExtractColumnSet(exprs ...Expression) *intsets.Sparse {
-	set := &intsets.Sparse{}
+func ExtractColumnSet(exprs ...Expression) intset.FastIntSet {
+	set := intset.NewFastIntSet()
 	for _, expr := range exprs {
-		extractColumnSet(expr, set)
+		extractColumnSet(expr, &set)
 	}
 	return set
 }
 
-func extractColumnSet(expr Expression, set *intsets.Sparse) {
+func extractColumnSet(expr Expression, set *intset.FastIntSet) {
 	switch v := expr.(type) {
 	case *Column:
 		set.Insert(int(v.UniqueID))
@@ -462,7 +462,7 @@ func ColumnSubstituteImpl(ctx BuildContext, expr Expression, schema *Schema, new
 					e.(*ScalarFunction).Function.getArgs()[0] = newArg
 				}
 				e.SetCoercibility(v.Coercibility())
-				e.GetType().SetFlag(flag)
+				e.GetType(ctx.GetEvalCtx()).SetFlag(flag)
 				return true, false, e
 			}
 			return false, false, v
@@ -496,11 +496,11 @@ func ColumnSubstituteImpl(ctx BuildContext, expr Expression, schema *Schema, new
 					return false, failed, v
 				}
 				if oldCollEt.Collation == newCollEt.Collation {
-					if newFuncExpr.GetType().GetCollate() == arg.GetType().GetCollate() && newFuncExpr.Coercibility() == arg.Coercibility() {
+					if newFuncExpr.GetType(ctx.GetEvalCtx()).GetCollate() == arg.GetType(ctx.GetEvalCtx()).GetCollate() && newFuncExpr.Coercibility() == arg.Coercibility() {
 						// It's safe to use the new expression, otherwise some cases in projection push-down will be wrong.
 						changed = true
 					} else {
-						changed = checkCollationStrictness(oldCollEt.Collation, newFuncExpr.GetType().GetCollate())
+						changed = checkCollationStrictness(oldCollEt.Collation, newFuncExpr.GetType(ctx.GetEvalCtx()).GetCollate())
 					}
 				}
 			}
@@ -519,7 +519,11 @@ func ColumnSubstituteImpl(ctx BuildContext, expr Expression, schema *Schema, new
 			}
 		}
 		if substituted {
-			return true, hasFail, NewFunctionInternal(ctx, v.FuncName.L, v.RetType, refExprArr.Result()...)
+			newFunc, err := NewFunction(ctx, v.FuncName.L, v.RetType, refExprArr.Result()...)
+			if err != nil {
+				return true, true, v
+			}
+			return true, hasFail, newFunc
 		}
 	}
 	return false, false, expr
@@ -605,7 +609,7 @@ func SubstituteCorCol2Constant(ctx BuildContext, expr Expression) (Expression, e
 			if err != nil {
 				return nil, err
 			}
-			return &Constant{Value: val, RetType: x.GetType()}, nil
+			return &Constant{Value: val, RetType: x.GetType(ctx.GetEvalCtx())}, nil
 		}
 		var (
 			err   error
@@ -617,15 +621,15 @@ func SubstituteCorCol2Constant(ctx BuildContext, expr Expression) (Expression, e
 			newSf = x.Clone()
 			newSf.(*ScalarFunction).GetArgs()[0] = newArgs[0]
 		} else {
-			newSf, err = NewFunction(ctx, x.FuncName.L, x.GetType(), newArgs...)
+			newSf, err = NewFunction(ctx, x.FuncName.L, x.GetType(ctx.GetEvalCtx()), newArgs...)
 		}
 		return newSf, err
 	case *CorrelatedColumn:
-		return &Constant{Value: *x.Data, RetType: x.GetType()}, nil
+		return &Constant{Value: *x.Data, RetType: x.GetType(ctx.GetEvalCtx())}, nil
 	case *Constant:
 		if x.DeferredExpr != nil {
 			newExpr := FoldConstant(ctx, x)
-			return &Constant{Value: newExpr.(*Constant).Value, RetType: x.GetType()}, nil
+			return &Constant{Value: newExpr.(*Constant).Value, RetType: x.GetType(ctx.GetEvalCtx())}, nil
 		}
 	}
 	return expr, nil
@@ -887,13 +891,13 @@ func pushNotAcrossExpr(ctx BuildContext, expr Expression, not bool) (_ Expressio
 			return childExpr, true
 		case ast.LT, ast.GE, ast.GT, ast.LE, ast.EQ, ast.NE:
 			if not {
-				return NewFunctionInternal(ctx, oppositeOp[f.FuncName.L], f.GetType(), f.GetArgs()...), true
+				return NewFunctionInternal(ctx, oppositeOp[f.FuncName.L], f.GetType(ctx.GetEvalCtx()), f.GetArgs()...), true
 			}
 			newArgs, changed := pushNotAcrossArgs(ctx, f.GetArgs(), false)
 			if !changed {
 				return f, false
 			}
-			return NewFunctionInternal(ctx, f.FuncName.L, f.GetType(), newArgs...), true
+			return NewFunctionInternal(ctx, f.FuncName.L, f.GetType(ctx.GetEvalCtx()), newArgs...), true
 		case ast.LogicAnd, ast.LogicOr:
 			var (
 				newArgs []Expression
@@ -910,7 +914,7 @@ func pushNotAcrossExpr(ctx BuildContext, expr Expression, not bool) (_ Expressio
 			if !changed {
 				return f, false
 			}
-			return NewFunctionInternal(ctx, funcName, f.GetType(), newArgs...), true
+			return NewFunctionInternal(ctx, funcName, f.GetType(ctx.GetEvalCtx()), newArgs...), true
 		}
 	}
 	if not {
@@ -997,7 +1001,7 @@ func Contains(exprs []Expression, e Expression) bool {
 
 // ExtractFiltersFromDNFs checks whether the cond is DNF. If so, it will get the extracted part and the remained part.
 // The original DNF will be replaced by the remained part or just be deleted if remained part is nil.
-// And the extracted part will be appended to the end of the orignal slice.
+// And the extracted part will be appended to the end of the original slice.
 func ExtractFiltersFromDNFs(ctx BuildContext, conditions []Expression) []Expression {
 	var allExtracted []Expression
 	for i := len(conditions) - 1; i >= 0; i-- {
@@ -1150,7 +1154,7 @@ func PopRowFirstArg(ctx BuildContext, e Expression) (ret Expression, err error) 
 		if len(args) == 2 {
 			return args[1], nil
 		}
-		ret, err = NewFunction(ctx, ast.RowFunc, f.GetType(), args[1:]...)
+		ret, err = NewFunction(ctx, ast.RowFunc, f.GetType(ctx.GetEvalCtx()), args[1:]...)
 		return ret, err
 	}
 	return
@@ -1204,14 +1208,14 @@ func (pc *ParamMarkerInPrepareChecker) Leave(in ast.Node) (out ast.Node, ok bool
 // it. Moreover, Column.RetType refers to the infoschema, if we modify it, data
 // race may happen if another goroutine read from the infoschema at the same
 // time.
-func DisableParseJSONFlag4Expr(expr Expression) {
+func DisableParseJSONFlag4Expr(ctx EvalContext, expr Expression) {
 	if _, isColumn := expr.(*Column); isColumn {
 		return
 	}
 	if _, isCorCol := expr.(*CorrelatedColumn); isCorCol {
 		return
 	}
-	expr.GetType().SetFlag(expr.GetType().GetFlag() & ^mysql.ParseToJSONFlag)
+	expr.GetType(ctx).SetFlag(expr.GetType(ctx).GetFlag() & ^mysql.ParseToJSONFlag)
 }
 
 // ConstructPositionExpr constructs PositionExpr with the given ParamMarkerExpr.
@@ -1249,7 +1253,7 @@ func GetStringFromConstant(ctx EvalContext, value Expression) (string, bool, err
 	return str, false, nil
 }
 
-// GetIntFromConstant gets an interger value from the Constant expression.
+// GetIntFromConstant gets an integer value from the Constant expression.
 func GetIntFromConstant(ctx EvalContext, value Expression) (int, bool, error) {
 	str, isNull, err := GetStringFromConstant(ctx, value)
 	if err != nil || isNull {
@@ -1394,7 +1398,7 @@ func GetUint64FromConstant(ctx EvalContext, expr Expression) (uint64, bool, bool
 	}
 	dt := con.Value
 	if con.ParamMarker != nil {
-		dt = con.ParamMarker.GetUserVar()
+		dt = con.ParamMarker.GetUserVar(ctx)
 	} else if con.DeferredExpr != nil {
 		var err error
 		dt, err = con.DeferredExpr.Eval(ctx, chunk.Row{})
@@ -1494,7 +1498,7 @@ func RemoveMutableConst(ctx BuildContext, exprs []Expression) (err error) {
 		case *Constant:
 			v.ParamMarker = nil
 			if v.DeferredExpr != nil { // evaluate and update v.Value to convert v to a complete immutable constant.
-				// TODO: remove or hide DefferedExpr since it's too dangerous (hard to be consistent with v.Value all the time).
+				// TODO: remove or hide DeferredExpr since it's too dangerous (hard to be consistent with v.Value all the time).
 				v.Value, err = v.DeferredExpr.Eval(ctx.GetEvalCtx(), chunk.Row{})
 				if err != nil {
 					return err

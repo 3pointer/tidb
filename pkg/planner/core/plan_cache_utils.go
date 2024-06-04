@@ -223,7 +223,7 @@ func GeneratePlanCacheStmtWithAST(ctx context.Context, sctx sessionctx.Context, 
 		RelateVersion:       relateVersion,
 		Params:              extractor.markers,
 	}
-	if err = CheckPreparedPriv(sctx, preparedObj, ret.InfoSchema); err != nil {
+	if err = checkPreparedPriv(sctx, preparedObj, ret.InfoSchema); err != nil {
 		return nil, nil, 0, err
 	}
 	return preparedObj, p, paramCount, nil
@@ -491,6 +491,23 @@ func (*PlanCacheQueryFeatures) Leave(in ast.Node) (out ast.Node, ok bool) {
 	return in, true
 }
 
+// PointGetExecutorCache caches the PointGetExecutor to further improve its performance.
+// Don't forget to reset this executor when the prior plan is invalid.
+type PointGetExecutorCache struct {
+	// Special (or tricky) optimization for PointGet Plan.
+	// Store the PointGet Plan in PlanCacheStmt directly to bypass the LRU Cache to gain some performance improvement.
+	// There is around 3% improvement, BenchmarkPreparedPointGet: 6450 ns/op --> 6250 ns/op.
+	pointPlan      base.Plan
+	pointPlanHints *hint.StmtHints
+	columnNames    types.NameSlice
+
+	ColumnInfos any
+	// Executor is only used for point get scene.
+	// Notice that we should only cache the PointGetExecutor that have a snapshot with MaxTS in it.
+	// If the current plan is not PointGet or does not use MaxTS optimization, this value should be nil here.
+	Executor any
+}
+
 // PlanCacheStmt store prepared ast from PrepareExec and other related fields
 type PlanCacheStmt struct {
 	PreparedAst *ast.Prepared
@@ -498,16 +515,7 @@ type PlanCacheStmt struct {
 	VisitInfos  []visitInfo
 	Params      []ast.ParamMarkerExpr
 
-	// To further improve the performance of PointGet, cache execution info for PointGet directly.
-	// Use any to avoid cycle import.
-	// TODO: caching execution info directly is risky and tricky to the optimizer, refactor it later.
-	PointGet struct {
-		ColumnInfos any
-		// Executor is only used for point get scene.
-		// Notice that we should only cache the PointGetExecutor that have a snapshot with MaxTS in it.
-		// If the current plan is not PointGet or does not use MaxTS optimization, this value should be nil here.
-		Executor any
-	}
+	PointGet PointGetExecutorCache
 
 	// below fields are for PointGet short path
 	SchemaVersion int64
@@ -558,7 +566,7 @@ func GetPreparedStmt(stmt *ast.ExecuteStmt, vars *variable.SessionVars) (*PlanCa
 
 // GetMatchOpts get options to fetch plan or generate new plan
 // we can add more options here
-func GetMatchOpts(sctx sessionctx.Context, is infoschema.InfoSchema, stmt *PlanCacheStmt, params []expression.Expression) (*utilpc.PlanCacheMatchOpts, error) {
+func GetMatchOpts(sctx sessionctx.Context, is infoschema.InfoSchema, stmt *PlanCacheStmt, params []expression.Expression) *utilpc.PlanCacheMatchOpts {
 	var statsVerHash uint64
 	var limitOffsetAndCount []uint64
 
@@ -605,7 +613,7 @@ func GetMatchOpts(sctx sessionctx.Context, is infoschema.InfoSchema, stmt *PlanC
 		StatsVersionHash:    statsVerHash,
 		ParamTypes:          parseParamTypes(sctx, params),
 		ForeignKeyChecks:    sctx.GetSessionVars().ForeignKeyChecks,
-	}, nil
+	}
 }
 
 // CheckTypesCompatibility4PC compares FieldSlice with []*types.FieldType
@@ -721,4 +729,24 @@ func isSafePointGetPath4PlanCacheScenario3(path *util.AccessPath) bool {
 		}
 	}
 	return true
+}
+
+// parseParamTypes get parameters' types in PREPARE statement
+func parseParamTypes(sctx sessionctx.Context, params []expression.Expression) (paramTypes []*types.FieldType) {
+	paramTypes = make([]*types.FieldType, 0, len(params))
+	for _, param := range params {
+		if c, ok := param.(*expression.Constant); ok { // from binary protocol
+			paramTypes = append(paramTypes, c.GetType(sctx.GetExprCtx().GetEvalCtx()))
+			continue
+		}
+
+		// from text protocol, there must be a GetVar function
+		name := param.(*expression.ScalarFunction).GetArgs()[0].String()
+		tp, ok := sctx.GetSessionVars().GetUserVarType(name)
+		if !ok {
+			tp = types.NewFieldType(mysql.TypeNull)
+		}
+		paramTypes = append(paramTypes, tp)
+	}
+	return
 }

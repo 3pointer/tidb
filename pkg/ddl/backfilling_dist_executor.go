@@ -59,6 +59,7 @@ type BackfillSubTaskMeta struct {
 	RangeSplitKeys [][]byte `json:"range_split_keys,omitempty"`
 	DataFiles      []string `json:"data-files,omitempty"`
 	StatFiles      []string `json:"stat-files,omitempty"`
+	TS             uint64   `json:"ts,omitempty"`
 	// Each group of MetaGroups represents a different index kvs meta.
 	MetaGroups []*external.SortedKVMeta `json:"meta_groups,omitempty"`
 	// Only used for adding one single index.
@@ -91,6 +92,8 @@ func (s *backfillDistExecutor) newBackfillSubtaskExecutor(
 	jobMeta := &s.taskMeta.Job
 	ddlObj := s.d
 
+	// TODO getTableByTxn is using DDL ctx which is never cancelled except when shutdown.
+	// we should move this operation out of GetStepExecutor, and put into Init.
 	_, tblIface, err := ddlObj.getTableByTxn((*asAutoIDRequirement)(ddlObj.ddlCtx), jobMeta.SchemaID, jobMeta.TableID)
 	if err != nil {
 		return nil, err
