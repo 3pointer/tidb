@@ -636,17 +636,6 @@ func (m MigrationExt) AppendMigration(ctx context.Context, mig *pb.Migration) (i
 	return newSN, m.s.WriteFile(ctx, name, data)
 }
 
-// ListAll returns a slice of all migrations in protobuf format.
-// This includes the base migration and any additional layers.
-func (migs Migrations) ListAll() []*pb.Migration {
-	pbMigs := make([]*pb.Migration, 0, len(migs.Layers)+1)
-	pbMigs = append(pbMigs, migs.Base)
-	for _, m := range migs.Layers {
-		pbMigs = append(pbMigs, &m.Content)
-	}
-	return pbMigs
-}
-
 // MergeTo merges migrations from the BASE in the live migrations until the specified sequence number.
 func (migs Migrations) MergeTo(seq int) *pb.Migration {
 	return migs.MergeToBy(seq, MergeMigrations)
@@ -661,6 +650,17 @@ func (migs Migrations) MergeToBy(seq int, merge func(m1, m2 *pb.Migration) *pb.M
 		newBase = merge(newBase, &mig.Content)
 	}
 	return newBase
+}
+
+// ListAll returns a slice of all migrations in protobuf format.
+// This includes the base migration and any additional layers.
+func (migs Migrations) ListAll() []*pb.Migration {
+	pbMigs := make([]*pb.Migration, 0, len(migs.Layers)+1)
+	pbMigs = append(pbMigs, migs.Base)
+	for _, m := range migs.Layers {
+		pbMigs = append(pbMigs, &m.Content)
+	}
+	return pbMigs
 }
 
 type mergeAndMigrateToConfig struct {

@@ -166,7 +166,7 @@ func NewSstRestoreManager(
 		return nil, errors.Trace(err)
 	}
 	if se != nil {
-		checkpointRunner, err := checkpoint.StartCheckpointRunnerForRestore(ctx, se)
+		checkpointRunner, err := checkpoint.StartCheckpointRunnerForRestore(ctx, se, checkpoint.CompactedRestoreCheckpointDatabaseName)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

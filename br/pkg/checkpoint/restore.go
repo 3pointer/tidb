@@ -115,13 +115,12 @@ type CheckpointMetadataForSnapshotRestore struct {
 	SchedulersConfig  *pdutil.ClusterConfig `json:"schedulers-config"`
 }
 
-func LoadCheckpointMetadataForSstRestore(
+func LoadCheckpointMetadataForSnapshotRestore(
 	ctx context.Context,
 	execCtx sqlexec.RestrictedSQLExecutor,
-	dbName string,
 ) (*CheckpointMetadataForSnapshotRestore, error) {
 	m := &CheckpointMetadataForSnapshotRestore{}
-	err := selectCheckpointMeta(ctx, execCtx, dbName, checkpointMetaTableName, m)
+	err := selectCheckpointMeta(ctx, execCtx, SnapshotRestoreCheckpointDatabaseName, checkpointMetaTableName, m)
 	return m, err
 }
 
