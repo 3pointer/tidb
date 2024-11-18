@@ -33,8 +33,32 @@ func (metaname *MetaName) Meta() Meta {
 	return metaname.meta
 }
 
-func newMetaName(meta Meta, name string) *MetaName {
+func NewMetaName(meta Meta, name string) *MetaName {
 	return &MetaName{meta: meta, name: name}
+}
+
+func NewMigrationBuilder(shiftStartTS, startTS, restoredTS uint64) *WithMigrationsBuilder {
+	return &WithMigrationsBuilder{
+		shiftStartTS: shiftStartTS,
+		startTS:      startTS,
+		restoredTS:   restoredTS,
+	}
+}
+
+func (m *MetaWithMigrations) StoreId() int64 {
+	return m.meta.StoreId
+}
+
+func (m *MetaWithMigrations) Meta() *backuppb.Metadata {
+	return m.meta
+}
+
+func (m *PhysicalWithMigrations) PhysicalLength() uint64 {
+	return m.physical.Item.Length
+}
+
+func (m *PhysicalWithMigrations) Physical() *backuppb.DataFileGroup {
+	return m.physical.Item
 }
 
 func (rc *LogClient) TEST_saveIDMap(
@@ -67,7 +91,7 @@ func (rc *LogFileManager) ReadStreamMeta(ctx context.Context) ([]*MetaName, erro
 func TEST_NewLogClient(clusterID, startTS, restoreTS, upstreamClusterID uint64, dom *domain.Domain, se glue.Session) *LogClient {
 	return &LogClient{
 		dom:               dom,
-		se:                se,
+		unsafeSession:     se,
 		upstreamClusterID: upstreamClusterID,
 		LogFileManager: &LogFileManager{
 			startTS:   startTS,

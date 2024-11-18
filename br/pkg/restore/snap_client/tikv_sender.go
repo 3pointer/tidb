@@ -129,7 +129,7 @@ func SortAndValidateFileRanges(
 	splitSizeBytes, splitKeyCount uint64,
 	splitOnTable bool,
 	onProgress func(int64),
-) ([][]byte, []restore.BatchRestoreFilesInfo, error) {
+) ([][]byte, []restore.BatchBackupFileSet, error) {
 	sortedPhysicalTables := getSortedPhysicalTables(createdTables)
 	// mapping table ID to its backup files
 	fileOfTable, hintSplitKeyCount := mapTableToFiles(allFiles)
@@ -142,8 +142,8 @@ func SortAndValidateFileRanges(
 		lastKey         []byte = nil
 
 		// group the files by the generated split keys
-		tableIDWithFilesGroup                               = make([]restore.BatchRestoreFilesInfo, 0, hintSplitKeyCount)
-		lastFilesGroup        restore.BatchRestoreFilesInfo = nil
+		tableIDWithFilesGroup                            = make([]restore.BatchBackupFileSet, 0, hintSplitKeyCount)
+		lastFilesGroup        restore.BatchBackupFileSet = nil
 
 		// statistic
 		mergedRangeCount = 0
@@ -234,7 +234,7 @@ func SortAndValidateFileRanges(
 			// append the new files into the group
 			if len(newFiles) > 0 {
 				if len(lastFilesGroup) == 0 || lastFilesGroup[len(lastFilesGroup)-1].TableID != table.NewPhysicalID {
-					lastFilesGroup = append(lastFilesGroup, restore.RestoreFilesInfo{
+					lastFilesGroup = append(lastFilesGroup, restore.BackupFileSet{
 						TableID:      table.NewPhysicalID,
 						SSTFiles:     nil,
 						RewriteRules: table.RewriteRules,
@@ -333,6 +333,7 @@ func (rc *SnapClient) SplitPoints(
 	splitClientOpts = append(splitClientOpts, split.WithOnSplit(func(keys [][]byte) {
 		onProgress(int64(len(keys)))
 	}))
+	// TODO seems duplicate with metaClient.
 	if isRawKv {
 		splitClientOpts = append(splitClientOpts, split.WithRawKV())
 	}
@@ -363,7 +364,7 @@ func getFileRangeKey(f string) string {
 // RestoreSSTFiles tries to do something prepare work, such as set speed limit, and restore the files.
 func (rc *SnapClient) RestoreSSTFiles(
 	ctx context.Context,
-	tableIDWithFilesGroup []restore.BatchRestoreFilesInfo,
+	tableIDWithFilesGroup []restore.BatchBackupFileSet,
 	onProgress func(int64),
 ) (retErr error) {
 	failpoint.Inject("corrupt-files", func(v failpoint.Value) {
@@ -384,9 +385,9 @@ func (rc *SnapClient) RestoreSSTFiles(
 		}
 	})
 
-	retErr = rc.restorer.Restore(onProgress, tableIDWithFilesGroup...)
+	retErr = rc.restorer.GoRestore(onProgress, tableIDWithFilesGroup...)
 	if retErr != nil {
 		return retErr
 	}
-	return rc.restorer.WaitUnitilFinish()
+	return rc.restorer.WaitUntilFinish()
 }

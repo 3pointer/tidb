@@ -97,7 +97,7 @@ func TestDeleteRangeQueryExec(t *testing.T) {
 	g := gluetidb.New()
 	client := logclient.NewRestoreClient(
 		split.NewFakePDClient(nil, false, nil), nil, nil, keepalive.ClientParameters{})
-	err := client.Init(ctx, g, m.Storage, false)
+	err := client.Init(ctx, g, m.Storage)
 	require.NoError(t, err)
 
 	client.RunGCRowsLoader(ctx)
@@ -116,7 +116,7 @@ func TestDeleteRangeQuery(t *testing.T) {
 	g := gluetidb.New()
 	client := logclient.NewRestoreClient(
 		split.NewFakePDClient(nil, false, nil), nil, nil, keepalive.ClientParameters{})
-	err := client.Init(ctx, g, m.Storage, false)
+	err := client.Init(ctx, g, m.Storage)
 	require.NoError(t, err)
 
 	client.RunGCRowsLoader(ctx)
@@ -1344,8 +1344,8 @@ func TestLogFilesIterWithSplitHelper(t *testing.T) {
 	}
 	mockIter := &mockLogIter{}
 	ctx := context.Background()
-	w := restore.PipelineFileRestorerWrapper[*logclient.LogDataFileInfo]{
-		RegionsSplitter: split.NewRegionsSplitter(split.NewFakeSplitClient(), 144*1024*1024, 1440000),
+	w := restore.PipelineRestorerWrapper[*logclient.LogDataFileInfo]{
+		PipelineRegionsSplitter: split.NewPipelineRegionsSplitter(split.NewFakeSplitClient(), 144*1024*1024, 1440000),
 	}
 	s, err := logclient.NewLogSplitStrategy(ctx, false, nil, rewriteRulesMap, func(uint64, uint64) {})
 	require.NoError(t, err)
@@ -1579,8 +1579,8 @@ func TestLogSplitStrategy(t *testing.T) {
 	logIter := toLogDataFileInfoIter(mockIter)
 
 	// Initialize a wrapper for the file restorer with a region splitter.
-	wrapper := restore.PipelineFileRestorerWrapper[*logclient.LogDataFileInfo]{
-		RegionsSplitter: split.NewRegionsSplitter(client, 4*units.MB, 400),
+	wrapper := restore.PipelineRestorerWrapper[*logclient.LogDataFileInfo]{
+		PipelineRegionsSplitter: split.NewPipelineRegionsSplitter(client, 4*units.MB, 400),
 	}
 
 	// Create a log split strategy with the given rewrite rules.
@@ -1588,8 +1588,7 @@ func TestLogSplitStrategy(t *testing.T) {
 	require.NoError(t, err)
 
 	// Set up a mock strategy to control split behavior.
-	expectSplitCount := 3
-	nextSplitCount := 5
+	expectSplitCount := 2
 	mockStrategy := &mockLogStrategy{
 		LogSplitStrategy: strategy,
 		// fakeFile(3, 100, 10*units.MiB, 100000) will skipped due to no rewrite rule found.
@@ -1603,7 +1602,6 @@ func TestLogSplitStrategy(t *testing.T) {
 	count := 0
 	for i := helper.TryNext(ctx); !i.Finished; i = helper.TryNext(ctx) {
 		require.NoError(t, i.Err)
-		count += 1
 		if count == expectSplitCount {
 			// Verify that no split occurs initially due to insufficient data.
 			regions, err := mockPDCli.ScanRegions(ctx, []byte{}, []byte{}, 0)
@@ -1613,8 +1611,9 @@ func TestLogSplitStrategy(t *testing.T) {
 			require.Equal(t, codec.EncodeBytes(nil, tablecodec.EncodeTablePrefix(100)), regions[1].Meta.StartKey)
 			require.Equal(t, codec.EncodeBytes(nil, tablecodec.EncodeTablePrefix(200)), regions[2].Meta.StartKey)
 			require.Equal(t, codec.EncodeBytes(nil, tablecodec.EncodeTablePrefix(402)), regions[2].Meta.EndKey)
-			mockStrategy.expectSplitCount = nextSplitCount
 		}
+		// iter.Filterout execute first
+		count += 1
 	}
 
 	// Verify that a split occurs on the second region due to excess data.
@@ -1723,8 +1722,8 @@ func TestCompactedSplitStrategy(t *testing.T) {
 		mockPDCli.SetRegions(oriRegions)
 
 		client := split.NewClient(mockPDCli, nil, nil, 100, 4)
-		wrapper := restore.PipelineFileRestorerWrapper[*backuppb.LogFileSubcompaction]{
-			RegionsSplitter: split.NewRegionsSplitter(client, 4*units.MB, 400),
+		wrapper := restore.PipelineRestorerWrapper[*backuppb.LogFileSubcompaction]{
+			PipelineRegionsSplitter: split.NewPipelineRegionsSplitter(client, 4*units.MB, 400),
 		}
 
 		strategy := logclient.NewCompactedFileSplitStrategy(rules, nil, nil)
@@ -1901,8 +1900,8 @@ func TestCompactedSplitStrategyWithCheckpoint(t *testing.T) {
 		mockPDCli.SetRegions(oriRegions)
 
 		client := split.NewClient(mockPDCli, nil, nil, 100, 4)
-		wrapper := restore.PipelineFileRestorerWrapper[*backuppb.LogFileSubcompaction]{
-			RegionsSplitter: split.NewRegionsSplitter(client, 4*units.MB, 400),
+		wrapper := restore.PipelineRestorerWrapper[*backuppb.LogFileSubcompaction]{
+			PipelineRegionsSplitter: split.NewPipelineRegionsSplitter(client, 4*units.MB, 400),
 		}
 		totalSize := 0
 		totalKvCount := 0

@@ -150,7 +150,6 @@ func RunRestoreRaw(c context.Context, g glue.Glue, cmdName string, cfg *RestoreR
 
 	onProgress := func(i int64) { updateCh.IncBy(i) }
 	// RawKV restore does not need to rewrite keys.
-	// err = client.GetRestorer().SplitRanges(ctx, ranges, onProgress)
 	err = client.SplitPoints(ctx, getEndKeys(ranges), onProgress, true)
 	if err != nil {
 		return errors.Trace(err)
@@ -164,11 +163,11 @@ func RunRestoreRaw(c context.Context, g glue.Glue, cmdName string, cfg *RestoreR
 	defer restore.RestorePostWork(ctx, importModeSwitcher, restoreSchedulers, cfg.Online)
 
 	start := time.Now()
-	err = client.GetRestorer().Restore(onProgress, restore.NewEmptyRuleSSTFilesInfos(files))
+	err = client.GetRestorer().GoRestore(onProgress, restore.CreateUniqueFileSets(files))
 	if err != nil {
 		return errors.Trace(err)
 	}
-	err = client.GetRestorer().WaitUnitilFinish()
+	err = client.GetRestorer().WaitUntilFinish()
 	if err != nil {
 		return errors.Trace(err)
 	}

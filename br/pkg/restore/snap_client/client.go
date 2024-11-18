@@ -75,7 +75,7 @@ const (
 const minBatchDdlSize = 1
 
 type SnapClient struct {
-	restorer restore.FileRestorer
+	restorer restore.SstRestorer
 	// Tool clients used by SnapClient
 	pdClient     pd.Client
 	pdHTTPClient pdhttp.Client
@@ -168,7 +168,7 @@ func NewRestoreClient(
 	}
 }
 
-func (rc *SnapClient) GetRestorer() restore.FileRestorer {
+func (rc *SnapClient) GetRestorer() restore.SstRestorer {
 	return rc.restorer
 }
 
@@ -187,8 +187,10 @@ func (rc *SnapClient) Close() {
 	// close the connection, and it must be succeed when in SQL mode.
 	rc.closeConn()
 
-	if err := rc.restorer.Close(); err != nil {
-		log.Warn("failed to close file restorer")
+	if rc.restorer != nil {
+		if err := rc.restorer.Close(); err != nil {
+			log.Warn("failed to close file restorer")
+		}
 	}
 
 	log.Info("Restore client closed")
@@ -314,7 +316,7 @@ func (rc *SnapClient) InitCheckpoint(
 	if !checkpointFirstRun {
 		execCtx := rc.db.Session().GetSessionCtx().GetRestrictedSQLExecutor()
 		// load the checkpoint since this is not the first time to restore
-		meta, err := checkpoint.LoadCheckpointMetadataForSstRestore(ctx, execCtx, checkpoint.SnapshotRestoreCheckpointDatabaseName)
+		meta, err := checkpoint.LoadCheckpointMetadataForSnapshotRestore(ctx, execCtx)
 		if err != nil {
 			return checkpointSetWithTableID, nil, errors.Trace(err)
 		}
@@ -344,7 +346,7 @@ func (rc *SnapClient) InitCheckpoint(
 		}
 
 		// t1 is the latest time the checkpoint ranges persisted to the external storage.
-		t1, err := checkpoint.LoadCheckpointDataForSstRestore(ctx, execCtx, checkpoint.SnapshotRestoreCheckpointDatabaseName, func(tableID int64, v checkpoint.RestoreValueType) {
+		t1, err := checkpoint.LoadCheckpointDataForSnapshotRestore(ctx, execCtx, func(tableID int64, v checkpoint.RestoreValueType) {
 			checkpointSet, exists := checkpointSetWithTableID[tableID]
 			if !exists {
 				checkpointSet = make(map[string]struct{})
@@ -355,7 +357,7 @@ func (rc *SnapClient) InitCheckpoint(
 		if err != nil {
 			return checkpointSetWithTableID, nil, errors.Trace(err)
 		}
-		// t2 is the latest time the checkpoint checksum persisted to the external storage.
+
 		checkpointChecksum, t2, err := checkpoint.LoadCheckpointChecksumForRestore(ctx, execCtx)
 		if err != nil {
 			return checkpointSetWithTableID, nil, errors.Trace(err)
@@ -377,7 +379,7 @@ func (rc *SnapClient) InitCheckpoint(
 		if config != nil {
 			meta.SchedulersConfig = &pdutil.ClusterConfig{Schedulers: config.Schedulers, ScheduleCfg: config.ScheduleCfg}
 		}
-		if err := checkpoint.SaveCheckpointMetadataForSstRestore(ctx, rc.db.Session(), checkpoint.SnapshotRestoreCheckpointDatabaseName, meta); err != nil {
+		if err := checkpoint.SaveCheckpointMetadataForSnapshotRestore(ctx, rc.db.Session(), meta); err != nil {
 			return checkpointSetWithTableID, nil, errors.Trace(err)
 		}
 	}
@@ -386,7 +388,7 @@ func (rc *SnapClient) InitCheckpoint(
 	if err != nil {
 		return checkpointSetWithTableID, nil, errors.Trace(err)
 	}
-	rc.checkpointRunner, err = checkpoint.StartCheckpointRunnerForRestore(ctx, se, checkpoint.SnapshotRestoreCheckpointDatabaseName)
+	rc.checkpointRunner, err = checkpoint.StartCheckpointRunnerForRestore(ctx, se)
 	return checkpointSetWithTableID, checkpointClusterConfig, errors.Trace(err)
 }
 
@@ -522,25 +524,26 @@ func (rc *SnapClient) initClients(ctx context.Context, backend *backuppb.Storage
 	importCli := importclient.NewImportClient(metaClient, rc.tlsConf, rc.keepaliveConf)
 
 	var fileImporter *SnapFileImporter
+	opt := NewSnapFileImporterOptions(
+		rc.cipher, metaClient, importCli, backend,
+		rc.rewriteMode, stores, rc.concurrencyPerStore, createCallBacks, closeCallBacks,
+	)
 	if isRawKvMode || isTxnKvMode {
 		mode := Raw
 		if isTxnKvMode {
 			mode = Txn
 		}
 		// for raw/txn mode. use backupMeta.ApiVersion to create fileImporter
-		fileImporter, err = NewSnapFileImporter(
-			ctx, rc.cipher, rc.backupMeta.ApiVersion, metaClient,
-			importCli, backend, mode, stores, rc.rewriteMode, rc.concurrencyPerStore, createCallBacks, closeCallBacks)
+		fileImporter, err = NewSnapFileImporter(ctx, rc.backupMeta.ApiVersion, mode, opt)
 		if err != nil {
 			return errors.Trace(err)
 		}
 		// Raw/Txn restore are not support checkpoint for now
-		rc.restorer = restore.NewSimpleFileRestorer(ctx, fileImporter, rc.workerPool, nil)
+		rc.restorer = restore.NewSimpleSstRestorer(ctx, fileImporter, rc.workerPool, nil)
 	} else {
 		// or create a fileImporter with the cluster API version
 		fileImporter, err = NewSnapFileImporter(
-			ctx, rc.cipher, rc.dom.Store().GetCodec().GetAPIVersion(), metaClient,
-			importCli, backend, TiDBFull, stores, rc.rewriteMode, rc.concurrencyPerStore, createCallBacks, closeCallBacks)
+			ctx, rc.dom.Store().GetCodec().GetAPIVersion(), TiDBFull, opt)
 		if err != nil {
 			return errors.Trace(err)
 		}

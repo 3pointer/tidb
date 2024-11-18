@@ -162,7 +162,8 @@ func TestSnapImporter(t *testing.T) {
 		splitClient.AppendPdRegion(region)
 	}
 	importClient := newFakeImporterClient()
-	importer, err := snapclient.NewSnapFileImporter(ctx, nil, kvrpcpb.APIVersion_V1, splitClient, importClient, nil, snapclient.TiDBFull, generateStores(), snapclient.RewriteModeKeyspace, 10, nil, nil)
+	opt := snapclient.NewSnapFileImporterOptionsForTest(splitClient, importClient, generateStores(), snapclient.RewriteModeKeyspace, 10)
+	importer, err := snapclient.NewSnapFileImporter(ctx, kvrpcpb.APIVersion_V1, snapclient.TiDBFull, opt)
 	require.NoError(t, err)
 	err = importer.SetDownloadSpeedLimit(ctx, 1, 5)
 	require.NoError(t, err)
@@ -171,8 +172,8 @@ func TestSnapImporter(t *testing.T) {
 	require.Error(t, err)
 	files, rules := generateFiles()
 	for _, file := range files {
-		importer.WaitUntilUnblock()
-		err = importer.Import(ctx, restore.RestoreFilesInfo{SSTFiles: []*backuppb.File{file}, RewriteRules: rules})
+		importer.PauseForBackpressure()
+		err = importer.Import(ctx, restore.BackupFileSet{SSTFiles: []*backuppb.File{file}, RewriteRules: rules})
 		require.NoError(t, err)
 	}
 	err = importer.Close()
@@ -186,14 +187,15 @@ func TestSnapImporterRaw(t *testing.T) {
 		splitClient.AppendPdRegion(region)
 	}
 	importClient := newFakeImporterClient()
-	importer, err := snapclient.NewSnapFileImporter(ctx, nil, kvrpcpb.APIVersion_V1, splitClient, importClient, nil, snapclient.Raw, generateStores(), snapclient.RewriteModeKeyspace, 10, nil, nil)
+	opt := snapclient.NewSnapFileImporterOptionsForTest(splitClient, importClient, generateStores(), snapclient.RewriteModeKeyspace, 10)
+	importer, err := snapclient.NewSnapFileImporter(ctx, kvrpcpb.APIVersion_V1, snapclient.Raw, opt)
 	require.NoError(t, err)
 	err = importer.SetRawRange([]byte(""), []byte(""))
 	require.NoError(t, err)
 	files, rules := generateFiles()
 	for _, file := range files {
-		importer.WaitUntilUnblock()
-		err = importer.Import(ctx, restore.RestoreFilesInfo{SSTFiles: []*backuppb.File{file}, RewriteRules: rules})
+		importer.PauseForBackpressure()
+		err = importer.Import(ctx, restore.BackupFileSet{SSTFiles: []*backuppb.File{file}, RewriteRules: rules})
 		require.NoError(t, err)
 	}
 	err = importer.Close()

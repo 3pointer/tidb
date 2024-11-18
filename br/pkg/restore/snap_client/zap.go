@@ -39,9 +39,9 @@ func zapTables(tables []CreatedTable) zapcore.Field {
 	})
 }
 
-type zapTableIDWithFilesMarshaler []restore.RestoreFilesInfo
+type zapTableIDWithFilesMarshaler restore.BatchBackupFileSet
 
-func zapTableIDWithFiles(fs []restore.RestoreFilesInfo) zap.Field {
+func zapTableIDWithFiles(fs restore.BatchBackupFileSet) zap.Field {
 	return zap.Object("files", zapTableIDWithFilesMarshaler(fs))
 }
 

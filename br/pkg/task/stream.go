@@ -920,7 +920,11 @@ func RunStreamAdvancer(c context.Context, g glue.Glue, cmdName string, cfg *Stre
 	env := streamhelper.CliEnv(mgr.StoreManager, mgr.GetStore(), etcdCLI)
 	advancer := streamhelper.NewCheckpointAdvancer(env)
 	advancer.UpdateConfig(cfg.AdvancerCfg)
-	advancerd := daemon.New(advancer, streamhelper.OwnerManagerForLogBackup(ctx, etcdCLI), cfg.AdvancerCfg.TickDuration)
+	ownerMgr := streamhelper.OwnerManagerForLogBackup(ctx, etcdCLI)
+	defer func() {
+		ownerMgr.Close()
+	}()
+	advancerd := daemon.New(advancer, ownerMgr, cfg.AdvancerCfg.TickDuration)
 	loop, err := advancerd.Begin(ctx)
 	if err != nil {
 		return err
@@ -1467,17 +1471,18 @@ func restoreStream(
 			return errors.Trace(err)
 		}
 
-		if cfg.UseCheckpoint {
-			failpoint.Inject("corrupt-files", func(v failpoint.Value) {
-				var retErr error
-				logFilesIter, retErr = logclient.WrapLogFilesIterWithCheckpointFailpoint(v, logFilesIter, rewriteRules)
-				defer func() { pErr = retErr }()
-			})
-		}
-
 		logFilesIterWithSplit, err := client.WrapLogFilesIterWithSplitHelper(ctx, logFilesIter, execCtx, rewriteRules, updateStatsWithCheckpoint, splitSize, splitKeys)
 		if err != nil {
 			return errors.Trace(err)
+		}
+
+		if cfg.UseCheckpoint {
+			// TODO make a failpoint iter inside the logclient.
+			failpoint.Inject("corrupt-files", func(v failpoint.Value) {
+				var retErr error
+				logFilesIterWithSplit, retErr = logclient.WrapLogFilesIterWithCheckpointFailpoint(v, logFilesIterWithSplit, rewriteRules)
+				defer func() { pErr = retErr }()
+			})
 		}
 
 		return client.RestoreKVFiles(ctx, rewriteRules, logFilesIterWithSplit,
@@ -1535,7 +1540,8 @@ func createRestoreClient(ctx context.Context, g glue.Glue, cfg *RestoreConfig, m
 	keepaliveCfg := GetKeepalive(&cfg.Config)
 	keepaliveCfg.PermitWithoutStream = true
 	client := logclient.NewRestoreClient(mgr.GetPDClient(), mgr.GetPDHTTPClient(), mgr.GetTLSConfig(), keepaliveCfg)
-	err = client.Init(ctx, g, mgr.GetStorage(), cfg.UseCheckpoint)
+
+	err = client.Init(ctx, g, mgr.GetStorage())
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1555,10 +1561,20 @@ func createRestoreClient(ctx context.Context, g glue.Glue, cfg *RestoreConfig, m
 		return nil, errors.Trace(err)
 	}
 	client.SetCrypter(&cfg.CipherInfo)
-	client.SetConcurrency(uint(cfg.Concurrency))
-	client.SetConcurrencyPerStore(cfg.ConcurrencyPerStore.Value)
 	client.SetUpstreamClusterID(cfg.upstreamClusterID)
-	client.InitClients(ctx, u)
+
+	createCheckpointSessionFn := func() (glue.Session, error) {
+		// always create a new session for checkpoint runner
+		// because session is not thread safe
+		if cfg.UseCheckpoint {
+			return g.CreateSession(mgr.GetStorage())
+		}
+		return nil, nil
+	}
+	err = client.InitClients(ctx, u, createCheckpointSessionFn, uint(cfg.Concurrency), cfg.ConcurrencyPerStore.Value)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
 	err = client.SetRawKVBatchClient(ctx, cfg.PD, cfg.TLS.ToKVSecurity())
 	if err != nil {
