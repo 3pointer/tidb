@@ -76,15 +76,13 @@ func (b *BaseSplitStrategy) GetAccumulations() *SplitHelperIterator {
 			continue
 		}
 		tableSplitters = append(tableSplitters, NewRewriteSpliter(
-			// TODO remove this field. sort by newTableID
-			codec.EncodeBytes([]byte{}, tablecodec.EncodeTablePrefix(newTableID)),
 			newTableID,
 			rewriteRule,
 			splitter,
 		))
 	}
 	sort.Slice(tableSplitters, func(i, j int) bool {
-		return bytes.Compare(tableSplitters[i].RewriteKey, tableSplitters[j].RewriteKey) < 0
+		return (tableSplitters[i].tableID < tableSplitters[j].tableID)
 	})
 	return NewSplitHelperIterator(tableSplitters)
 }
@@ -98,23 +96,20 @@ func (b *BaseSplitStrategy) ResetAccumulations() {
 }
 
 type RewriteSplitter struct {
-	RewriteKey []byte
-	tableID    int64
-	rule       *restoreutils.RewriteRules
-	splitter   *SplitHelper
+	tableID  int64
+	rule     *restoreutils.RewriteRules
+	splitter *SplitHelper
 }
 
 func NewRewriteSpliter(
-	rewriteKey []byte,
 	tableID int64,
 	rule *restoreutils.RewriteRules,
 	splitter *SplitHelper,
 ) *RewriteSplitter {
 	return &RewriteSplitter{
-		RewriteKey: rewriteKey,
-		tableID:    tableID,
-		rule:       rule,
-		splitter:   splitter,
+		tableID:  tableID,
+		rule:     rule,
+		splitter: splitter,
 	}
 }
 
