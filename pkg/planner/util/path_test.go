@@ -105,19 +105,37 @@ func TestOnlyPointRange(t *testing.T) {
 	tc := sctx.GetSessionVars().StmtCtx.TypeCtx()
 	intHandlePath := &util.AccessPath{IsIntHandlePath: true}
 	intHandlePath.Ranges = []*ranger.Range{&nullPointRange, &onePointRange}
-	require.True(t, intHandlePath.OnlyPointRange(tc))
+	require.True(t, intHandlePath.OnlyPointRange(tc, nil))
 	intHandlePath.Ranges = []*ranger.Range{&onePointRange, &one2TwoRange}
-	require.False(t, intHandlePath.OnlyPointRange(tc))
+	require.False(t, intHandlePath.OnlyPointRange(tc, nil))
 
 	indexPath := &util.AccessPath{Index: &model.IndexInfo{Columns: make([]*model.IndexColumn, 1)}}
 	indexPath.Ranges = []*ranger.Range{&onePointRange}
-	require.True(t, indexPath.OnlyPointRange(tc))
+	require.True(t, indexPath.OnlyPointRange(tc, nil))
 	indexPath.Ranges = []*ranger.Range{&nullPointRange, &onePointRange}
-	require.False(t, indexPath.OnlyPointRange(tc))
+	require.False(t, indexPath.OnlyPointRange(tc, nil))
 	indexPath.Ranges = []*ranger.Range{&onePointRange, &one2TwoRange}
-	require.False(t, indexPath.OnlyPointRange(tc))
+	require.False(t, indexPath.OnlyPointRange(tc, nil))
 
 	indexPath.Index.Columns = make([]*model.IndexColumn, 2)
 	indexPath.Ranges = []*ranger.Range{&onePointRange}
-	require.False(t, indexPath.OnlyPointRange(tc))
+	require.False(t, indexPath.OnlyPointRange(tc, nil))
+
+	primaryIndex := &model.IndexInfo{Primary: true, Columns: make([]*model.IndexColumn, 2)}
+	tableInfo := &model.TableInfo{IsCommonHandle: true, Indices: []*model.IndexInfo{primaryIndex}}
+	commonHandlePath := &util.AccessPath{
+		IsCommonHandlePath: true,
+		Index:              &model.IndexInfo{Columns: make([]*model.IndexColumn, 1)},
+		Ranges:             []*ranger.Range{&onePointRange},
+	}
+	// The one-column columnar index cannot make a primary-key prefix a full point.
+	require.False(t, commonHandlePath.OnlyPointRange(tc, tableInfo))
+	twoColumnPoint := &ranger.Range{
+		LowVal:    []types.Datum{types.NewIntDatum(1), types.NewIntDatum(2)},
+		HighVal:   []types.Datum{types.NewIntDatum(1), types.NewIntDatum(2)},
+		Collators: collate.GetBinaryCollatorSlice(2),
+	}
+	commonHandlePath.Ranges = []*ranger.Range{twoColumnPoint}
+	require.True(t, commonHandlePath.OnlyPointRange(tc, tableInfo))
+
 }

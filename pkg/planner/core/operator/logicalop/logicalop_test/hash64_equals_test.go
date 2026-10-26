@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/tidb/pkg/types"
 	"github.com/pingcap/tidb/pkg/util/chunk"
 	"github.com/pingcap/tidb/pkg/util/mock"
+	"github.com/pingcap/tipb/go-tipb"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1085,4 +1086,66 @@ func TestHandleColsHash64Equals(t *testing.T) {
 	intH2.Hash64(hasher2)
 	require.NotEqual(t, hasher1.Sum64(), hasher2.Sum64())
 	require.False(t, intH1.Equals(intH2))
+}
+
+func TestDataSourceHash64EqualsIncludesFTSQuery(t *testing.T) {
+	newDataSource := func() *logicalop.DataSource {
+		alias := ast.NewCIStr("t")
+		topK := uint32(10)
+		return &logicalop.DataSource{
+			TableInfo:   &model.TableInfo{ID: 1},
+			TableAsName: &alias,
+			Columns:     []*model.ColumnInfo{{ID: 2}},
+			FtsPushDown: &logicalop.FTSPushDown{
+				IndexInfo: &model.IndexInfo{ID: 3},
+				QueryInfo: &tipb.FTSQueryInfo{
+					QueryType: tipb.FTSQueryType_FTSQueryTypeWithScore,
+					IndexId:   3,
+					TopK:      &topK,
+					QueryFunc: tipb.ScalarFuncSig_FTSMatchWord,
+					MatchExpr: []tipb.Expr{{
+						Tp:  tipb.ExprType_ScalarFunc,
+						Sig: tipb.ScalarFuncSig_FTSMatchWord,
+						Val: []byte(`{"version":1,"query":"foo"}`),
+					}},
+				},
+			},
+		}
+	}
+	left := newDataSource()
+	hash := func(ds *logicalop.DataSource) uint64 {
+		hasher := base.NewHashEqualer()
+		ds.Hash64(hasher)
+		return hasher.Sum64()
+	}
+	right := newDataSource()
+	require.True(t, left.Equals(right))
+	require.Equal(t, hash(left), hash(right))
+
+	for _, tc := range []struct {
+		name   string
+		change func(*logicalop.FTSPushDown)
+	}{
+		{"query metadata", func(fts *logicalop.FTSPushDown) {
+			fts.QueryInfo.MatchExpr[0].Val = []byte(`{"version":1,"query":"bar"}`)
+		}},
+		{"selected index", func(fts *logicalop.FTSPushDown) { fts.IndexInfo.ID++ }},
+		{"query index", func(fts *logicalop.FTSPushDown) { fts.QueryInfo.IndexId++ }},
+		{"top k", func(fts *logicalop.FTSPushDown) { *fts.QueryInfo.TopK++ }},
+		{"nil query", func(fts *logicalop.FTSPushDown) { fts.QueryInfo = nil }},
+		{"nil index", func(fts *logicalop.FTSPushDown) { fts.IndexInfo = nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			right := newDataSource()
+			tc.change(right.FtsPushDown)
+			require.False(t, left.Equals(right))
+			require.NotEqual(t, hash(left), hash(right))
+		})
+	}
+	right.FtsPushDown = nil
+	require.False(t, left.Equals(right))
+	require.NotEqual(t, hash(left), hash(right))
+	left.FtsPushDown = nil
+	require.True(t, left.Equals(right))
+	require.Equal(t, hash(left), hash(right))
 }

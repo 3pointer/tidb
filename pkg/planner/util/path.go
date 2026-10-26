@@ -425,8 +425,9 @@ func isColEqExpr(expr expression.Expression, col *expression.Column, checkFn fun
 	return false
 }
 
-// OnlyPointRange checks whether each range is a point(no interval range exists).
-func (path *AccessPath) OnlyPointRange(tc types.Context) bool {
+// OnlyPointRange checks whether each range is a complete point rather than a prefix.
+// tblInfo supplies the primary key for common-handle paths whose Index may be columnar.
+func (path *AccessPath) OnlyPointRange(tc types.Context, tblInfo *model.TableInfo) bool {
 	if path.IsIntHandlePath {
 		for _, ran := range path.Ranges {
 			if !ran.IsPointNullable(tc) {
@@ -435,9 +436,13 @@ func (path *AccessPath) OnlyPointRange(tc types.Context) bool {
 		}
 		return true
 	}
+	index := path.Index
+	if path.IsCommonHandlePath {
+		index = tblInfo.GetPrimaryKey()
+	}
 	for _, ran := range path.Ranges {
 		// Not point or the not full matched.
-		if !ran.IsPointNonNullable(tc) || len(ran.HighVal) != len(path.Index.Columns) {
+		if !ran.IsPointNonNullable(tc) || len(ran.HighVal) != len(index.Columns) {
 			return false
 		}
 	}

@@ -641,14 +641,18 @@ func (p *PhysicalTableScan) explainFullTextIndex(idx *ColumnarIndexExtra, normal
 		}
 		ftsIndexBuffer.WriteString(" ")
 	}
-	if normalized {
-		ftsIndexBuffer.WriteString("?")
+	if len(ftsQueryInfo.MatchExpr) > 0 {
+		ftsIndexBuffer.WriteString(formatFTSMatchExprForExplain(p, ftsQueryInfo.MatchExpr[0], normalized, redactMode))
 	} else {
-		redact.WriteRedact(ftsIndexBuffer, ftsQueryInfo.QueryText, redactMode)
-	}
-	if len(ftsQueryInfo.ColumnNames) > 0 {
-		ftsIndexBuffer.WriteString(" IN ")
-		ftsIndexBuffer.WriteString(ftsQueryInfo.ColumnNames[0])
+		if normalized {
+			ftsIndexBuffer.WriteString("?")
+		} else {
+			redact.WriteRedact(ftsIndexBuffer, ftsQueryInfo.QueryText, redactMode)
+		}
+		if len(ftsQueryInfo.ColumnNames) > 0 {
+			ftsIndexBuffer.WriteString(" IN ")
+			ftsIndexBuffer.WriteString(strings.Join(ftsQueryInfo.ColumnNames, ", "))
+		}
 	}
 	cols := p.Schema().Columns
 	if len(cols) > 0 && ftsQueryInfo.QueryType == tipb.FTSQueryType_FTSQueryTypeWithScore &&
@@ -657,6 +661,86 @@ func (p *PhysicalTableScan) explainFullTextIndex(idx *ColumnarIndexExtra, normal
 		ftsIndexBuffer.WriteString(cols[len(cols)-1].ExplainInfo(ectx))
 	}
 	return ftsIndexBuffer.String()
+}
+
+func formatFTSMatchExprForExplain(p *PhysicalTableScan, expr tipb.Expr, normalized bool, redactMode string) string {
+	var result string
+	switch expr.Sig {
+	case tipb.ScalarFuncSig_FTSMatchWord, tipb.ScalarFuncSig_FTSMatchPrefix:
+		clause, err := expression.DecodeFTSQueryClause(expr)
+		if err != nil {
+			return "<invalid>"
+		}
+		query := &strings.Builder{}
+		if normalized {
+			query.WriteString("?")
+		} else {
+			redact.WriteRedact(query, fmt.Sprint(clause.Query), redactMode)
+		}
+		fields := make([]string, 0, len(clause.Fields))
+		for _, field := range clause.Fields {
+			fields = append(fields, ftsExplainColumnName(p, field.ColID))
+		}
+		result = query.String()
+		if len(fields) > 0 {
+			result += " IN " + strings.Join(fields, ", ")
+		}
+	case tipb.ScalarFuncSig_LogicalAnd, tipb.ScalarFuncSig_LogicalOr:
+		operator := " AND "
+		if expr.Sig == tipb.ScalarFuncSig_LogicalOr {
+			operator = " OR "
+		}
+		children := make([]string, 0, len(expr.Children))
+		for _, child := range expr.Children {
+			if child == nil {
+				children = append(children, "<invalid>")
+				continue
+			}
+			children = append(children, formatFTSMatchExprForExplain(p, *child, normalized, redactMode))
+		}
+		result = "(" + strings.Join(children, operator) + ")"
+	case tipb.ScalarFuncSig_UnaryNotInt, tipb.ScalarFuncSig_UnaryNotReal:
+		if len(expr.Children) != 1 || expr.Children[0] == nil {
+			return "NOT(<invalid>)"
+		}
+		result = "NOT(" + formatFTSMatchExprForExplain(p, *expr.Children[0], normalized, redactMode) + ")"
+	default:
+		return "<unsupported>"
+	}
+	if metadata, err := expression.DecodeFTSQueryClause(expr); err == nil &&
+		metadata.ScoreMode == expression.FtsScoreModeFilter {
+		result = "filter(" + result + ")"
+	}
+	return result
+}
+
+func ftsExplainColumnName(p *PhysicalTableScan, columnID int64) string {
+	for i, columnInfo := range p.Columns {
+		if columnInfo.ID != columnID {
+			continue
+		}
+		if i < len(p.Schema().Columns) && p.Schema().Columns[i].OrigName != "" {
+			return p.Schema().Columns[i].OrigName
+		}
+		return columnInfo.Name.O
+	}
+	if p.Table != nil {
+		for _, columnInfo := range p.Table.Columns {
+			if columnInfo.ID != columnID {
+				continue
+			}
+			nameParts := make([]string, 0, 3)
+			if p.DBName.O != "" {
+				nameParts = append(nameParts, p.DBName.O)
+			}
+			if p.Table.Name.O != "" {
+				nameParts = append(nameParts, p.Table.Name.O)
+			}
+			nameParts = append(nameParts, columnInfo.Name.O)
+			return strings.Join(nameParts, ".")
+		}
+	}
+	return fmt.Sprintf("Column#%d", columnID)
 }
 
 func (p *PhysicalTableScan) haveCorCol() bool {

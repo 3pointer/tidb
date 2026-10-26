@@ -49,7 +49,6 @@ const (
 	FlagEliminateUnionAllDualItem
 	FlagEmptySelectionEliminator
 	FlagResolveExpand
-	FlagFullTextIndexResolveWhere
 	FlagFullTextIndexResolveTopN
 	FlagFullTextIndexResolveProjection
 	FlagFullTextIndexResolveReject

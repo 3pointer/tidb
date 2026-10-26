@@ -191,52 +191,6 @@ func FieldTypeToInvertedIndexInfo(tp types.FieldType, columnID int64) *InvertedI
 	}
 }
 
-// FullTextParserType is the tokenizer kind.
-// Note: Must use UPPER_UNDER_SCORE naming convension.
-type FullTextParserType string
-
-const (
-	// FullTextParserTypeInvalid is the invalid tokenizer
-	FullTextParserTypeInvalid FullTextParserType = "INVALID"
-	// FullTextParserTypeStandardV1 is the standard parser, for English texts
-	// The value matches with the supported tokenizer in Libclara.
-	FullTextParserTypeStandardV1 FullTextParserType = "STANDARD_V1"
-	// FullTextParserTypeMultilingualV1 is a parser for multilingual texts
-	// The value matches with the supported tokenizer in Libclara.
-	FullTextParserTypeMultilingualV1 FullTextParserType = "MULTILINGUAL_V1"
-)
-
-// SQLName returns the SQL keyword name of the fulltext parser, which must not include
-// any version or internal suffix. This is what we present to users and show in error messages.
-func (t FullTextParserType) SQLName() string {
-	switch t {
-	case FullTextParserTypeStandardV1:
-		return "STANDARD"
-	case FullTextParserTypeMultilingualV1:
-		return "MULTILINGUAL"
-	default:
-		return "INVALID"
-	}
-}
-
-// GetFullTextParserTypeBySQLName returns the FullTextParserType by a SQL name.
-func GetFullTextParserTypeBySQLName(name string) FullTextParserType {
-	switch strings.ToUpper(name) {
-	case "STANDARD":
-		return FullTextParserTypeStandardV1
-	case "MULTILINGUAL":
-		return FullTextParserTypeMultilingualV1
-	default:
-		return FullTextParserTypeInvalid
-	}
-}
-
-// FullTextIndexInfo is the information of FULLTEXT index of a column.
-type FullTextIndexInfo struct {
-	ParserType FullTextParserType `json:"parser_type"`
-	// TODO: Add other options
-}
-
 // ColumnarIndexType is the type of columnar index.
 type ColumnarIndexType uint8
 

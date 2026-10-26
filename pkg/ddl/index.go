@@ -132,7 +132,7 @@ func buildIndexColumns(ctx *metabuild.Context, columns []*model.ColumnInfo, inde
 		if columnarIndexType == model.ColumnarIndexTypeInverted && !types.IsTypeStoredAsInteger(col.FieldType.GetType()) {
 			return nil, false, dbterror.ErrUnsupportedAddColumnarIndex.FastGenByArgs(fmt.Sprintf("only support integer type, but this is type: %s", col.FieldType.String()))
 		}
-		if columnarIndexType == model.ColumnarIndexTypeFulltext && !types.IsString(col.FieldType.GetType()) {
+		if columnarIndexType == model.ColumnarIndexTypeFulltext && !isSupportedFullTextColumnType(&col.FieldType) {
 			return nil, false, dbterror.ErrUnsupportedAddColumnarIndex.FastGenByArgs(fmt.Sprintf("only support string type, but this is type: %s", col.FieldType.String()))
 		}
 
@@ -304,6 +304,54 @@ func checkIndexColumn(col *model.ColumnInfo, indexColumnLen int, suppressTooLong
 	return nil
 }
 
+func isFullTextStringColumnType(fieldType *types.FieldType) bool {
+	return fieldType != nil && types.IsNonBinaryStr(fieldType)
+}
+
+func isFullTextExactNativeColumnType(tp byte) bool {
+	switch tp {
+	case mysql.TypeTiny, mysql.TypeShort, mysql.TypeInt24, mysql.TypeLong, mysql.TypeLonglong,
+		mysql.TypeBit, mysql.TypeYear, mysql.TypeFloat, mysql.TypeDouble,
+		mysql.TypeDate, mysql.TypeNewDate, mysql.TypeDatetime, mysql.TypeTimestamp, mysql.TypeDuration,
+		mysql.TypeEnum:
+		return true
+	default:
+		return false
+	}
+}
+
+func isSupportedFullTextColumnType(fieldType *types.FieldType) bool {
+	return isFullTextStringColumnType(fieldType) ||
+		(fieldType != nil && isFullTextExactNativeColumnType(fieldType.GetType()))
+}
+
+func checkFullTextParserColumnType(col *model.ColumnInfo, parserType model.FullTextParserType) error {
+	if col == nil {
+		return dbterror.ErrUnsupportedAddColumnarIndex.FastGenByArgs("fulltext index column does not exist")
+	}
+	fieldType := &col.FieldType
+	switch parserType {
+	case model.FullTextParserTypeExactV1:
+		if isFullTextStringColumnType(fieldType) || isFullTextExactNativeColumnType(fieldType.GetType()) {
+			return nil
+		}
+		return dbterror.ErrUnsupportedAddColumnarIndex.FastGenByArgs(fmt.Sprintf(
+			"fulltext parser %s does not support column %s of type %s",
+			parserType.SQLName(), col.Name, fieldType.String()))
+	case model.FullTextParserTypeStandardV1, model.FullTextParserTypeMultilingualV1,
+		model.FullTextParserTypeNgramV1, model.FullTextParserTypePathHierarchyV1:
+		if isFullTextStringColumnType(fieldType) {
+			return nil
+		}
+		return dbterror.ErrUnsupportedAddColumnarIndex.FastGenByArgs(fmt.Sprintf(
+			"fulltext parser %s can only be used on a non-binary string-like column, but column %s has type %s",
+			parserType.SQLName(), col.Name, fieldType.String()))
+	default:
+		return dbterror.ErrUnsupportedAddColumnarIndex.FastGenByArgs(fmt.Sprintf(
+			"unknown fulltext parser %s for column %s", parserType, col.Name))
+	}
+}
+
 // getIndexColumnLength calculate the bytes number required in an index column.
 func getIndexColumnLength(col *model.ColumnInfo, colLen int, columnarIndexType model.ColumnarIndexType) (int, error) {
 	if columnarIndexType != model.ColumnarIndexTypeNA {
@@ -392,6 +440,7 @@ func BuildIndexInfo(
 	isPrimary, isUnique bool,
 	columnarIndexType model.ColumnarIndexType,
 	indexPartSpecifications []*ast.IndexPartSpecification,
+	fullTextIndexPartSpecifications []*ast.FullTextIndexPartSpecification,
 	indexOption *ast.IndexOption,
 	state model.SchemaState,
 ) (*model.IndexInfo, error) {
@@ -421,7 +470,7 @@ func BuildIndexInfo(
 		}
 		idxInfo.InvertedInfo = invertedInfo
 	case model.ColumnarIndexTypeFulltext:
-		ftsInfo, err := buildFullTextInfoWithCheck(indexPartSpecifications, indexOption, tblInfo)
+		ftsInfo, err := buildFullTextInfoWithCheck(fullTextIndexPartSpecifications, indexPartSpecifications, indexOption, tblInfo)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -566,51 +615,212 @@ func checkFullTextSupportedInStarter() error {
 	return nil
 }
 
-func buildFullTextInfoWithCheck(indexPartSpecifications []*ast.IndexPartSpecification, indexOption *ast.IndexOption,
-	tblInfo *model.TableInfo) (*model.FullTextIndexInfo, error) {
+func buildFullTextInfoWithCheck(
+	fullTextIndexPartSpecifications []*ast.FullTextIndexPartSpecification,
+	indexPartSpecifications []*ast.IndexPartSpecification,
+	indexOption *ast.IndexOption,
+	tblInfo *model.TableInfo,
+) (*model.FullTextIndexInfo, error) {
 	if err := checkFullTextSupportedInStarter(); err != nil {
 		return nil, err
 	}
-	if len(indexPartSpecifications) != 1 {
-		return nil, dbterror.ErrUnsupportedAddColumnarIndex.FastGen("FULLTEXT index only support one column")
-	}
-	idxPart := indexPartSpecifications[0]
-	if idxPart.Column == nil {
-		return nil, dbterror.ErrUnsupportedAddColumnarIndex.FastGen("FULLTEXT index only support one column")
-	}
-	if idxPart.Length != types.UnspecifiedLength {
-		return nil, dbterror.ErrUnsupportedAddColumnarIndex.FastGen("FULLTEXT index does not support prefix length")
-	}
-	if idxPart.Desc {
-		return nil, dbterror.ErrUnsupportedAddColumnarIndex.FastGen("FULLTEXT index does not support DESC order")
-	}
-	// The Default parser is STANDARD
-	parser := model.FullTextParserTypeStandardV1
-	if indexOption != nil && indexOption.ParserName.L != "" {
-		parser = model.GetFullTextParserTypeBySQLName(indexOption.ParserName.L)
-		if parser == model.FullTextParserTypeInvalid {
-			// Actually indexOption must be valid. It is already checked in preprocessor.
-			return nil, dbterror.ErrUnsupportedAddColumnarIndex.FastGen("fulltext index must specify a valid parser")
+	for _, part := range indexPartSpecifications {
+		if part == nil || part.Column == nil || part.Expr != nil {
+			return nil, dbterror.ErrUnsupportedAddColumnarIndex.FastGen("FULLTEXT index must specify column names")
+		}
+		if part.Length != types.UnspecifiedLength {
+			return nil, dbterror.ErrUnsupportedAddColumnarIndex.FastGen("FULLTEXT index does not support prefix length")
+		}
+		if part.Desc {
+			return nil, dbterror.ErrUnsupportedAddColumnarIndex.FastGen("FULLTEXT index does not support DESC order")
 		}
 	}
-	colInfo := findColumnByName(idxPart.Column.Name.L, tblInfo)
-	if colInfo == nil {
-		return nil, infoschema.ErrColumnNotExists.GenWithStackByArgs(idxPart.Column.Name.L, tblInfo.Name)
+	if indexOption != nil {
+		indexOption.NormalizeLegacyFullTextParserName()
 	}
-	for _, idx := range tblInfo.Indices {
-		if idx.FullTextInfo == nil {
-			continue
+	if len(fullTextIndexPartSpecifications) == 0 {
+		// Accept callers that only provide the generic, column-only projection.
+		fullTextIndexPartSpecifications = make([]*ast.FullTextIndexPartSpecification, 0, len(indexPartSpecifications))
+		for _, part := range indexPartSpecifications {
+			if part.Column == nil {
+				return nil, fmt.Errorf("fulltext index must specify column names")
+			}
+			fullTextIndexPartSpecifications = append(fullTextIndexPartSpecifications, &ast.FullTextIndexPartSpecification{Column: part.Column})
 		}
-		if idxCol := idx.FindColumnByName(colInfo.Name.L); idxCol == nil {
-			continue
-		}
-		return nil, dbterror.ErrDupKeyName.GenWithStack(
-			fmt.Sprintf("fulltext index '%s' already exist on column %s",
-				idx.Name, colInfo.Name))
 	}
-	return &model.FullTextIndexInfo{
-		ParserType: parser,
-	}, nil
+	if len(fullTextIndexPartSpecifications) == 0 {
+		return nil, fmt.Errorf("fulltext index must specify at least one column")
+	}
+
+	hasColumnParserSpecs := false
+	for _, part := range fullTextIndexPartSpecifications {
+		if part == nil || part.Column == nil {
+			return nil, fmt.Errorf("fulltext index must specify column names")
+		}
+		if len(part.ParserSpecs) > 0 {
+			hasColumnParserSpecs = true
+			break
+		}
+	}
+	if hasColumnParserSpecs && indexOption != nil && indexOption.FullTextParser != nil {
+		return nil, fmt.Errorf("fulltext index cannot mix index-level and column-level parser definitions")
+	}
+
+	sharedParser := &ast.FullTextParserSpec{ParserType: model.FullTextParserTypeStandardV1}
+	if indexOption != nil && indexOption.FullTextParser != nil {
+		sharedParser = indexOption.FullTextParser
+	}
+	if !hasColumnParserSpecs {
+		if _, err := buildFullTextIndexFieldOption(sharedParser); err != nil {
+			return nil, err
+		}
+	}
+
+	seenColumns := make(map[string]struct{}, len(fullTextIndexPartSpecifications))
+	indexFields := make([]model.FullTextIndexFieldInfo, 0, len(fullTextIndexPartSpecifications))
+	for _, part := range fullTextIndexPartSpecifications {
+		if part == nil || part.Column == nil {
+			return nil, fmt.Errorf("fulltext index must specify column names")
+		}
+		columnName := part.Column.Name.L
+		if _, ok := seenColumns[columnName]; ok {
+			return nil, fmt.Errorf("duplicate fulltext index column %s", part.Column.Name.O)
+		}
+		seenColumns[columnName] = struct{}{}
+
+		colInfo := findColumnByName(columnName, tblInfo)
+		if colInfo == nil {
+			return nil, infoschema.ErrColumnNotExists.GenWithStackByArgs(columnName, tblInfo.Name)
+		}
+		parserSpecs := part.ParserSpecs
+		if !hasColumnParserSpecs {
+			parserSpecs = []*ast.FullTextParserSpec{sharedParser}
+		} else if len(parserSpecs) == 0 {
+			return nil, fmt.Errorf("every fulltext index column must specify at least one parser")
+		}
+
+		seenParsers := make(map[model.FullTextParserType]struct{}, len(parserSpecs))
+		for _, parserSpec := range parserSpecs {
+			if parserSpec == nil || parserSpec.ParserType == model.FullTextParserTypeInvalid {
+				return nil, fmt.Errorf("fulltext index must specify a valid parser")
+			}
+			if err := checkFullTextParserColumnType(colInfo, parserSpec.ParserType); err != nil {
+				return nil, err
+			}
+			if _, ok := seenParsers[parserSpec.ParserType]; ok {
+				return nil, fmt.Errorf("duplicate fulltext parser %s for column %s", parserSpec.ParserType.SQLName(), colInfo.Name)
+			}
+			seenParsers[parserSpec.ParserType] = struct{}{}
+
+			fieldOption, err := buildFullTextIndexFieldOption(parserSpec)
+			if err != nil {
+				return nil, err
+			}
+			indexFields = append(indexFields, model.FullTextIndexFieldInfo{
+				ColumnID:         colInfo.ID,
+				IndexFieldOption: fieldOption,
+			})
+		}
+	}
+
+	info := &model.FullTextIndexInfo{IndexFields: indexFields}
+	if !hasColumnParserSpecs {
+		info.ParserType = sharedParser.ParserType
+	}
+	return info, nil
+}
+
+const maxFullTextNgramGram = 5
+
+func buildFullTextIndexFieldOption(parserSpec *ast.FullTextParserSpec) (model.FullTextIndexFieldOption, error) {
+	parser := parserSpec.ParserType
+	fieldOption := model.FullTextIndexFieldOption{
+		AnalyzerType: parser,
+		EnableBM25:   true,
+	}
+	switch parser {
+	case model.FullTextParserTypeNgramV1:
+		if parserSpec.PathHierarchy != nil {
+			return model.FullTextIndexFieldOption{}, fmt.Errorf("fulltext parser NGRAM does not support PATH_HIERARCHY parameters")
+		}
+		ngram, err := buildFullTextNgramOption(parserSpec.Ngram)
+		if err != nil {
+			return model.FullTextIndexFieldOption{}, err
+		}
+		fieldOption.Ngram = ngram
+	case model.FullTextParserTypePathHierarchyV1:
+		if parserSpec.Ngram != nil {
+			return model.FullTextIndexFieldOption{}, fmt.Errorf("fulltext parser PATH_HIERARCHY does not support NGRAM parameters")
+		}
+		pathHierarchy, err := buildFullTextPathHierarchyOption(parserSpec.PathHierarchy)
+		if err != nil {
+			return model.FullTextIndexFieldOption{}, err
+		}
+		fieldOption.PathHierarchy = pathHierarchy
+	case model.FullTextParserTypeStandardV1, model.FullTextParserTypeMultilingualV1, model.FullTextParserTypeExactV1:
+		if parserSpec.Ngram != nil || parserSpec.PathHierarchy != nil {
+			return model.FullTextIndexFieldOption{}, fmt.Errorf("fulltext parser %s does not support parameters", parser.SQLName())
+		}
+	default:
+		return model.FullTextIndexFieldOption{}, fmt.Errorf("fulltext index must specify a valid parser")
+	}
+	return fieldOption, nil
+}
+
+func buildFullTextNgramOption(params *ast.FullTextNgramParserParams) (*model.FullTextNgramOption, error) {
+	option := &model.FullTextNgramOption{
+		MinGram:     model.DefaultFullTextNgramMinGram,
+		MaxGram:     model.DefaultFullTextNgramMaxGram,
+		Granularity: model.DefaultFullTextNgramGranularity,
+		LowerCase:   model.DefaultFullTextNgramLowerCase,
+	}
+	if params == nil {
+		return option, nil
+	}
+	if params.MinGram != nil {
+		option.MinGram = *params.MinGram
+	}
+	if params.MaxGram != nil {
+		option.MaxGram = *params.MaxGram
+	}
+	if params.Granularity != nil {
+		granularity, ok := model.GetFullTextNgramGranularityBySQLName(*params.Granularity)
+		if !ok {
+			return nil, fmt.Errorf("GRANULARITY must be 'word' or 'char'")
+		}
+		option.Granularity = granularity
+	}
+	if params.LowerCase != nil {
+		option.LowerCase = *params.LowerCase
+	}
+	if err := validateFullTextNgramOption(option); err != nil {
+		return nil, err
+	}
+	return option, nil
+}
+
+func buildFullTextPathHierarchyOption(params *ast.FullTextPathHierarchyParserParams) (*model.FullTextPathHierarchyOption, error) {
+	delimiter := model.DefaultFullTextPathHierarchyDelimiter
+	if params != nil && params.Delimiter != nil {
+		delimiter = *params.Delimiter
+	}
+	if delimiter == "" {
+		return nil, fmt.Errorf("DELIMITER must not be empty")
+	}
+	return &model.FullTextPathHierarchyOption{Delimiter: delimiter}, nil
+}
+
+func validateFullTextNgramOption(option *model.FullTextNgramOption) error {
+	if option.MinGram < 2 {
+		return fmt.Errorf("MIN_GRAM must be greater than or equal to 2")
+	}
+	if option.MaxGram < option.MinGram {
+		return fmt.Errorf("MAX_GRAM must be greater than or equal to MIN_GRAM")
+	}
+	if option.MaxGram > maxFullTextNgramGram {
+		return fmt.Errorf("MAX_GRAM must be less than or equal to %d", maxFullTextNgramGram)
+	}
+	return nil
 }
 
 // AddIndexColumnFlag aligns the column flags of columns in TableInfo to IndexInfo.
@@ -865,6 +1075,7 @@ func checkAndBuildIndexInfo(
 		args.Unique,
 		columnarIndexType,
 		args.IndexPartSpecifications,
+		args.FullTextIndexPartSpecifications,
 		args.IndexOption,
 		model.StateNone,
 	)

@@ -1068,6 +1068,9 @@ func isFullIndexMatch(candidate *candidatePath) bool {
 }
 
 func matchProperty(ds *logicalop.DataSource, path *util.AccessPath, prop *property.PhysicalProperty) property.PhysicalPropMatchResult {
+	if logicalop.IsExactFTSPath(ds, path) {
+		return property.PropNotMatched
+	}
 	// This function may set the two fields below for the PropMatchedNeedMergeSort case, so we reset them here to
 	// avoid leaving the AccessPath with an inconsistent state when there are multiple calls to matchProperty with
 	// different properties.
@@ -1523,7 +1526,7 @@ func matchPropForIndexMergeAlternatives(ds *logicalop.DataSource, path *util.Acc
 			// if matchIdxes greater than 1, we should sort this match alternative path by its CountAfterAccess.
 			alternatives := oneORBranch
 			slices.SortStableFunc(matchIdxes, func(a, b int) int {
-				res := cmpAlternatives(ds.SCtx().GetSessionVars())(alternatives[a], alternatives[b])
+				res := cmpAlternatives(ds.SCtx().GetSessionVars(), ds.TableInfo)(alternatives[a], alternatives[b])
 				if res != 0 {
 					return res
 				}

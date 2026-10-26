@@ -150,7 +150,7 @@ type DataSource struct {
 
 	// FtsPushDown stores extracted FTS query metadata, when FTS_MATCH_WORD() can
 	// be planned as a TiFlash full-text search scan.
-	FtsPushDown *FTSPushDown
+	FtsPushDown *FTSPushDown `hash64-equals:"true"`
 }
 
 // Init initializes DataSource.
@@ -195,6 +195,11 @@ func (ds *DataSource) PredicatePushDown(predicates []expression.Expression) ([]e
 		return nil, dual, nil
 	}
 	ds.PushedDownConds, predicates = expression.PushDownExprs(util.GetPushDownCtx(ds.SCtx()), predicates, kv.UnSpecified)
+	if ds.SCtx().GetSessionVars().StmtCtx.FTSFunctionIsUsed {
+		if err := ds.resolveFTSWherePredicate(); err != nil {
+			return nil, nil, err
+		}
+	}
 	return predicates, ds, nil
 }
 

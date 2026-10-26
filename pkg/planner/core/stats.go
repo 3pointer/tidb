@@ -128,6 +128,22 @@ func deriveStats4DataSource(lp base.LogicalPlan) (*property.StatsInfo, bool, err
 	for i, expr := range ds.PushedDownConds {
 		ds.PushedDownConds[i] = expression.EliminateNoPrecisionLossCast(exprCtx, expr)
 	}
+	if ds.FtsPushDown != nil {
+		// An FTS index identifies the search field, while table ranges still
+		// address row handles. Derive those ranges on an ordinary table path.
+		handlePath := genTiFlashPath(ds.TableInfo)
+		if err := deriveTablePathStats(ds, handlePath, ds.PushedDownConds, true); err != nil {
+			return nil, false, err
+		}
+		ds.SetStats(deriveStatsByFilter(ds, ds.PushedDownConds, []*util.AccessPath{handlePath}))
+		if err := deriveTablePathStats(ds, handlePath, ds.PushedDownConds, false); err != nil {
+			return nil, false, err
+		}
+		installFTSHandlePathStats(ds.PossibleAccessPaths[0], handlePath)
+		ds.AllPossibleAccessPaths = ds.PossibleAccessPaths
+		ds.AccessPathMinSelectivity, _ = getGeneralAttributesFromPaths(ds.PossibleAccessPaths, float64(ds.TblColHists.RealtimeCount))
+		return ds.StatsInfo(), true, nil
+	}
 	// Index pruning is now done earlier in CollectPredicateColumnsPoint to avoid loading stats for pruned indexes.
 	// Fill index paths for all paths
 	ds.CheckPartialIndexes()
@@ -153,9 +169,6 @@ func deriveStats4DataSource(lp base.LogicalPlan) (*property.StatsInfo, bool, err
 	if err := generateIndexMergePath(ds); err != nil {
 		return nil, false, err
 	}
-	if err := cleanAccessPathForFTS(ds); err != nil {
-		return nil, false, err
-	}
 
 	indexForce := false
 	ds.AccessPathMinSelectivity, indexForce = getGeneralAttributesFromPaths(ds.PossibleAccessPaths, float64(ds.TblColHists.RealtimeCount))
@@ -164,6 +177,25 @@ func deriveStats4DataSource(lp base.LogicalPlan) (*property.StatsInfo, bool, err
 	}
 
 	return ds.StatsInfo(), true, nil
+}
+
+func installFTSHandlePathStats(exactPath, handlePath *util.AccessPath) {
+	*exactPath = util.AccessPath{
+		Index:               exactPath.Index,
+		Ranges:              handlePath.Ranges,
+		CountAfterAccess:    handlePath.CountAfterAccess,
+		MinCountAfterAccess: handlePath.MinCountAfterAccess,
+		MaxCountAfterAccess: handlePath.MaxCountAfterAccess,
+		AccessConds:         handlePath.AccessConds,
+		TableFilters:        handlePath.TableFilters,
+		ConstCols:           handlePath.ConstCols,
+		StoreType:           exactPath.StoreType,
+		IsIntHandlePath:     exactPath.IsIntHandlePath,
+		IsCommonHandlePath:  exactPath.IsCommonHandlePath,
+		Forced:              exactPath.Forced,
+		ForceNoKeepOrder:    exactPath.ForceNoKeepOrder,
+		IsSingleScan:        true,
+	}
 }
 
 func fillIndexPath(ds *logicalop.DataSource, path *util.AccessPath, conds []expression.Expression) error {
@@ -189,7 +221,7 @@ func fillIndexPath(ds *logicalop.DataSource, path *util.AccessPath, conds []expr
 			}
 		}
 	}
-	err := detachCondAndBuildRangeForPath(ds.SCtx(), path, conds, ds.TableStats.HistColl)
+	err := detachCondAndBuildRangeForPath(ds.SCtx(), path, conds, ds.TableStats.HistColl, path.Index)
 	return err
 }
 
@@ -408,12 +440,18 @@ func deriveTablePathStats(ds *logicalop.DataSource, path *util.AccessPath, conds
 func deriveCommonHandleTablePathStats(ds *logicalop.DataSource, path *util.AccessPath, conds []expression.Expression, isIm bool) error {
 	path.CountAfterAccess = float64(ds.StatisticTable.RealtimeCount)
 	path.Ranges = ranger.FullNotNullRange()
+	// A columnar path may carry an FTS index, but its row keys are still
+	// encoded by the table's clustered primary key.
+	primaryIndex := ds.TableInfo.GetPrimaryKey()
+	if primaryIndex == nil || !primaryIndex.Primary {
+		return errors.New("primary index is missing for common handle table")
+	}
 	path.IdxCols, path.IdxColLens, path.FullIdxCols, path.FullIdxColLens =
-		util.IndexInfo2Cols(ds.Columns, ds.Schema().Columns, path.Index)
+		util.IndexInfo2Cols(ds.Columns, ds.Schema().Columns, primaryIndex)
 	if len(conds) == 0 {
 		return nil
 	}
-	if err := detachCondAndBuildRangeForPath(ds.SCtx(), path, conds, ds.TableStats.HistColl); err != nil {
+	if err := detachCondAndBuildRangeForPath(ds.SCtx(), path, conds, ds.TableStats.HistColl, primaryIndex); err != nil {
 		return err
 	}
 	if path.EqOrInCondCount == len(path.AccessConds) {
@@ -451,6 +489,7 @@ func detachCondAndBuildRangeForPath(
 	path *util.AccessPath,
 	conds []expression.Expression,
 	histColl *statistics.HistColl,
+	rangeIndex *model.IndexInfo,
 ) error {
 	if len(path.IdxCols) == 0 {
 		path.TableFilters = conds
@@ -474,9 +513,9 @@ func detachCondAndBuildRangeForPath(
 		}
 	}
 	indexCols := path.IdxCols
-	if len(indexCols) > len(path.Index.Columns) {
+	if len(indexCols) > len(rangeIndex.Columns) {
 		// Trim appended handle dimensions and keep only real index-definition columns for stats estimation.
-		indexCols = indexCols[0:len(path.Index.Columns)]
+		indexCols = indexCols[0:len(rangeIndex.Columns)]
 	}
 	needPruneEstimateRange := false
 	if len(indexCols) < len(path.IdxCols) {
@@ -496,7 +535,7 @@ func detachCondAndBuildRangeForPath(
 			return err
 		}
 	}
-	count, err := cardinality.GetRowCountByIndexRanges(sctx, histColl, path.Index.ID, estimateRanges, indexCols)
+	count, err := cardinality.GetRowCountByIndexRanges(sctx, histColl, rangeIndex.ID, estimateRanges, indexCols)
 	if err != nil {
 		return err
 	}
@@ -709,7 +748,7 @@ func derivePathStatsAndTryHeuristics(ds *logicalop.DataSource) error {
 			selected = path
 			break
 		}
-		if path.OnlyPointRange(ds.SCtx().GetSessionVars().StmtCtx.TypeCtx()) {
+		if path.OnlyPointRange(ds.SCtx().GetSessionVars().StmtCtx.TypeCtx(), ds.TableInfo) {
 			if path.IsTablePath() || path.Index.Unique {
 				if path.IsSingleScan {
 					selected = path

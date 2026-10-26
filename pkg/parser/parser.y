@@ -61,6 +61,76 @@ func getMaskingPolicyRestrictOp(name string) (ast.MaskingPolicyRestrictOps, bool
 	}
 	return ast.MaskingPolicyRestrictOpNone, false
 }
+func mergeFullTextNgramParserParams(dst, src *ast.FullTextNgramParserParams) string {
+	if src.MinGram != nil && dst.MinGram != nil {
+		return "MIN_GRAM"
+	}
+	if src.MaxGram != nil && dst.MaxGram != nil {
+		return "MAX_GRAM"
+	}
+	if src.Granularity != nil && dst.Granularity != nil {
+		return "GRANULARITY"
+	}
+	if src.LowerCase != nil && dst.LowerCase != nil {
+		return "LOWER_CASE"
+	}
+	if src.MinGram != nil {
+		dst.MinGram = src.MinGram
+	}
+	if src.MaxGram != nil {
+		dst.MaxGram = src.MaxGram
+	}
+	if src.Granularity != nil {
+		dst.Granularity = src.Granularity
+	}
+	if src.LowerCase != nil {
+		dst.LowerCase = src.LowerCase
+	}
+	return ""
+}
+
+func mergeFullTextParserParams(dst, src *ast.FullTextParserSpec) string {
+	if src.Ngram != nil {
+		if dst.Ngram == nil {
+			dst.Ngram = &ast.FullTextNgramParserParams{}
+		}
+		if duplicate := mergeFullTextNgramParserParams(dst.Ngram, src.Ngram); duplicate != "" {
+			return duplicate
+		}
+	}
+	if src.PathHierarchy != nil && src.PathHierarchy.Delimiter != nil {
+		if dst.PathHierarchy != nil && dst.PathHierarchy.Delimiter != nil {
+			return "DELIMITER"
+		}
+		if dst.PathHierarchy == nil {
+			dst.PathHierarchy = &ast.FullTextPathHierarchyParserParams{}
+		}
+		dst.PathHierarchy.Delimiter = src.PathHierarchy.Delimiter
+	}
+	return ""
+}
+
+func validateFullTextParserParams(spec *ast.FullTextParserSpec) string {
+	switch spec.ParserType {
+	case ast.FullTextParserTypeInvalid:
+		// Unsupported parser names are rejected by the preprocessor.
+		return ""
+	case ast.FullTextParserTypeNgramV1:
+		if spec.PathHierarchy != nil {
+			return "fulltext parser NGRAM does not support DELIMITER"
+		}
+	case ast.FullTextParserTypePathHierarchyV1:
+		if spec.Ngram != nil {
+			return "fulltext parser PATH_HIERARCHY does not support NGRAM parameters"
+		}
+	case ast.FullTextParserTypeStandardV1, ast.FullTextParserTypeMultilingualV1, ast.FullTextParserTypeExactV1:
+		if spec.Ngram != nil || spec.PathHierarchy != nil {
+			return "fulltext parser " + spec.ParserType.SQLName() + " does not support parameters"
+		}
+	}
+	return ""
+}
+
 %}
 
 %union {
@@ -431,6 +501,7 @@ func getMaskingPolicyRestrictOp(name string) (ast.MaskingPolicyRestrictOps, bool
 	declare                    "DECLARE"
 	definer                    "DEFINER"
 	delayKeyWrite              "DELAY_KEY_WRITE"
+	delimiter                  "DELIMITER"
 	delta                      "DELTA"
 	digest                     "DIGEST"
 	directory                  "DIRECTORY"
@@ -458,6 +529,7 @@ func getMaskingPolicyRestrictOp(name string) (ast.MaskingPolicyRestrictOps, bool
 	event                      "EVENT"
 	events                     "EVENTS"
 	evolve                     "EVOLVE"
+	exact                      "EXACT"
 	exchange                   "EXCHANGE"
 	exclusive                  "EXCLUSIVE"
 	execute                    "EXECUTE"
@@ -476,11 +548,13 @@ func getMaskingPolicyRestrictOp(name string) (ast.MaskingPolicyRestrictOps, bool
 	following                  "FOLLOWING"
 	format                     "FORMAT"
 	found                      "FOUND"
+	ftsMatchWord               "FTS_MATCH_WORD"
 	full                       "FULL"
 	function                   "FUNCTION"
 	general                    "GENERAL"
 	global                     "GLOBAL"
 	grants                     "GRANTS"
+	granularity                "GRANULARITY"
 	handler                    "HANDLER"
 	hash                       "HASH"
 	help                       "HELP"
@@ -521,10 +595,12 @@ func getMaskingPolicyRestrictOp(name string) (ast.MaskingPolicyRestrictOps, bool
 	location                   "LOCATION"
 	locked                     "LOCKED"
 	logs                       "LOGS"
+	lowerCase                  "LOWER_CASE"
 	masking                    "MASKING"
 	master                     "MASTER"
 	materialized               "MATERIALIZED"
 	maxConnectionsPerHour      "MAX_CONNECTIONS_PER_HOUR"
+	maxGram                    "MAX_GRAM"
 	max_idxnum                 "MAX_IDXNUM"
 	max_minutes                "MAX_MINUTES"
 	maxQueriesPerHour          "MAX_QUERIES_PER_HOUR"
@@ -538,17 +614,20 @@ func getMaskingPolicyRestrictOp(name string) (ast.MaskingPolicyRestrictOps, bool
 	microsecond                "MICROSECOND"
 	minute                     "MINUTE"
 	minValue                   "MINVALUE"
+	minGram                    "MIN_GRAM"
 	minRows                    "MIN_ROWS"
 	mode                       "MODE"
 	modify                     "MODIFY"
 	monitor                    "MONITOR"
 	month                      "MONTH"
+	multilingual               "MULTILINGUAL"
 	names                      "NAMES"
 	national                   "NATIONAL"
 	ncharType                  "NCHAR"
 	never                      "NEVER"
 	next                       "NEXT"
 	nextval                    "NEXTVAL"
+	ngram                      "NGRAM"
 	no                         "NO"
 	nocache                    "NOCACHE"
 	nocycle                    "NOCYCLE"
@@ -583,6 +662,7 @@ func getMaskingPolicyRestrictOp(name string) (ast.MaskingPolicyRestrictOps, bool
 	partitions                 "PARTITIONS"
 	password                   "PASSWORD"
 	passwordLockTime           "PASSWORD_LOCK_TIME"
+	pathHierarchy              "PATH_HIERARCHY"
 	pause                      "PAUSE"
 	percent                    "PERCENT"
 	per_db                     "PER_DB"
@@ -682,6 +762,7 @@ func getMaskingPolicyRestrictOp(name string) (ast.MaskingPolicyRestrictOps, bool
 	sqlTsiSecond               "SQL_TSI_SECOND"
 	sqlTsiWeek                 "SQL_TSI_WEEK"
 	sqlTsiYear                 "SQL_TSI_YEAR"
+	standard                   "STANDARD"
 	start                      "START"
 	statsAutoRecalc            "STATS_AUTO_RECALC"
 	statsColChoice             "STATS_COL_CHOICE"
@@ -779,7 +860,6 @@ func getMaskingPolicyRestrictOp(name string) (ast.MaskingPolicyRestrictOps, bool
 	dryRun                "DRYRUN"
 	dump                  "DUMP"
 	endTime               "END_TIME"
-	exact                 "EXACT"
 	execElapsed           "EXEC_ELAPSED"
 	exprPushdownBlacklist "EXPR_PUSHDOWN_BLACKLIST"
 	extract               "EXTRACT"
@@ -1012,6 +1092,7 @@ func getMaskingPolicyRestrictOp(name string) (ast.MaskingPolicyRestrictOps, bool
 	FunctionCallGeneric             "Function call with Identifier"
 	FunctionCallKeyword             "Function call with keyword as function name"
 	FunctionCallNonKeyword          "Function call with nonkeyword as function name"
+	FTSQueryField                   "full-text query field"
 	Literal                         "literal value"
 	Variable                        "User or system variable"
 	SystemVariable                  "System defined variable name"
@@ -1273,6 +1354,15 @@ func getMaskingPolicyRestrictOp(name string) (ast.MaskingPolicyRestrictOps, bool
 	ForceOpt                               "Force opt"
 	InstanceOption                         "Instance option"
 	FulltextSearchModifierOpt              "Fulltext modifier"
+	FullTextIndexPartSpecification         "fulltext index column and parsers"
+	FullTextIndexPartSpecificationList     "list of fulltext index columns and parsers"
+	FullTextParserSpec                     "typed fulltext parser specification"
+	FullTextParserSpecList                 "list of typed fulltext parser specifications"
+	FullTextParserSpecListOpt              "optional list of typed fulltext parser specifications"
+	FullTextParserParamListOpt             "optional fulltext parser parameter list"
+	FullTextParserParamList                "fulltext parser parameter list"
+	FullTextParserParam                    "fulltext parser parameter"
+	FTSQueryFieldList                      "full-text query field list"
 	PluginNameList                         "Plugin Name List"
 	ShowImportJobTarget                    "IMPORT JOB target with optional RAW keyword"
 	ShowImportJobsTarget                   "IMPORT JOBS target with optional RAW keyword"
@@ -1737,6 +1827,7 @@ func getMaskingPolicyRestrictOp(name string) (ast.MaskingPolicyRestrictOps, bool
 	CharsetName                     "Character set name"
 	CollationName                   "Collation name"
 	ColumnFormat                    "Column format"
+	FTSQueryParserType              "full-text query parser type"
 	DBName                          "Database Name"
 	PolicyName                      "Placement Policy Name"
 	ResourceGroupName               "Resource Group Name"
@@ -4300,13 +4391,13 @@ ConstraintElem:
 		}
 		$$ = c
 	}
-|	"FULLTEXT" KeyOrIndexOpt IndexName '(' IndexPartSpecificationList ')' IndexOptionList
+|	"FULLTEXT" KeyOrIndexOpt IndexName '(' FullTextIndexPartSpecificationList ')' IndexOptionList
 	{
 		c := &ast.Constraint{
-			Tp:           ast.ConstraintFulltext,
-			Keys:         $5.([]*ast.IndexPartSpecification),
-			Name:         $3.(*ast.NullString).String,
-			IsEmptyIndex: $3.(*ast.NullString).Empty,
+			Tp:                              ast.ConstraintFulltext,
+			FullTextIndexPartSpecifications: $5.([]*ast.FullTextIndexPartSpecification),
+			Name:                            $3.(*ast.NullString).String,
+			IsEmptyIndex:                    $3.(*ast.NullString).Empty,
 		}
 		if $7 != nil {
 			c.Option = $7.(*ast.IndexOption)
@@ -4732,6 +4823,38 @@ CreateIndexStmt:
 			LockAlg:                 indexLockAndAlgorithm,
 		}
 	}
+|	"CREATE" "FULLTEXT" "INDEX" IfNotExists Identifier IndexTypeOpt "ON" TableName '(' FullTextIndexPartSpecificationList ')' IndexOptionList IndexLockAndAlgorithmOpt
+	{
+		var indexOption *ast.IndexOption
+		if $12 != nil {
+			indexOption = $12.(*ast.IndexOption)
+			if indexOption.Tp == ast.IndexTypeInvalid && $6 != nil {
+				indexOption.Tp = $6.(ast.IndexType)
+			}
+		} else {
+			indexOption = &ast.IndexOption{}
+			if $6 != nil {
+				indexOption.Tp = $6.(ast.IndexType)
+			}
+		}
+		var indexLockAndAlgorithm *ast.IndexLockAndAlgorithm
+		if $13 != nil {
+			indexLockAndAlgorithm = $13.(*ast.IndexLockAndAlgorithm)
+			if indexLockAndAlgorithm.LockTp == ast.LockTypeDefault && indexLockAndAlgorithm.AlgorithmTp == ast.AlgorithmTypeDefault {
+				indexLockAndAlgorithm = nil
+			}
+		}
+
+		$$ = &ast.CreateIndexStmt{
+			IfNotExists:                     $4.(bool),
+			IndexName:                       $5,
+			Table:                           $8.(*ast.TableName),
+			FullTextIndexPartSpecifications: $10.([]*ast.FullTextIndexPartSpecification),
+			IndexOption:                     indexOption,
+			KeyType:                         ast.IndexKeyTypeFulltext,
+			LockAlg:                         indexLockAndAlgorithm,
+		}
+	}
 
 IndexPartSpecificationListOpt:
 	{
@@ -4760,6 +4883,44 @@ IndexPartSpecification:
 |	'(' Expression ')' OptOrder
 	{
 		$$ = &ast.IndexPartSpecification{Expr: $2, Desc: $4.(bool)}
+	}
+
+FullTextIndexPartSpecificationList:
+	FullTextIndexPartSpecification
+	{
+		$$ = []*ast.FullTextIndexPartSpecification{$1.(*ast.FullTextIndexPartSpecification)}
+	}
+|	FullTextIndexPartSpecificationList ',' FullTextIndexPartSpecification
+	{
+		$$ = append($1.([]*ast.FullTextIndexPartSpecification), $3.(*ast.FullTextIndexPartSpecification))
+	}
+
+FullTextIndexPartSpecification:
+	ColumnName FullTextParserSpecListOpt
+	{
+		$$ = &ast.FullTextIndexPartSpecification{
+			Column:      $1.(*ast.ColumnName),
+			ParserSpecs: $2.([]*ast.FullTextParserSpec),
+		}
+	}
+
+FullTextParserSpecListOpt:
+	{
+		$$ = []*ast.FullTextParserSpec{}
+	}
+|	"WITH" '(' FullTextParserSpecList ')'
+	{
+		$$ = $3
+	}
+
+FullTextParserSpecList:
+	FullTextParserSpec
+	{
+		$$ = []*ast.FullTextParserSpec{$1.(*ast.FullTextParserSpec)}
+	}
+|	FullTextParserSpecList ',' FullTextParserSpec
+	{
+		$$ = append($1.([]*ast.FullTextParserSpec), $3.(*ast.FullTextParserSpec))
 	}
 
 IndexLockAndAlgorithmOpt:
@@ -4806,10 +4967,6 @@ IndexKeyTypeOpt:
 |	"SPATIAL"
 	{
 		$$ = ast.IndexKeyTypeSpatial
-	}
-|	"FULLTEXT"
-	{
-		$$ = ast.IndexKeyTypeFulltext
 	}
 |	"VECTOR"
 	{
@@ -7591,8 +7748,8 @@ IndexOptionList:
 				opt1.Tp = opt2.Tp
 			} else if opt2.KeyBlockSize > 0 {
 				opt1.KeyBlockSize = opt2.KeyBlockSize
-			} else if len(opt2.ParserName.O) > 0 {
-				opt1.ParserName = opt2.ParserName
+			} else if opt2.FullTextParser != nil {
+				opt1.FullTextParser = opt2.FullTextParser
 			} else if opt2.Visibility != ast.IndexVisibilityDefault {
 				opt1.Visibility = opt2.Visibility
 			} else if opt2.PrimaryKeyTp != ast.PrimaryKeyTypeDefault {
@@ -7638,10 +7795,10 @@ IndexOption:
 			Tp: $1.(ast.IndexType),
 		}
 	}
-|	"WITH" "PARSER" Identifier
+|	"WITH" "PARSER" FullTextParserSpec
 	{
 		$$ = &ast.IndexOption{
-			ParserName: ast.NewCIStr($3),
+			FullTextParser: $3.(*ast.FullTextParserSpec),
 		}
 	}
 |	"COMMENT" stringLit
@@ -7703,6 +7860,73 @@ IndexOption:
 		$$ = &ast.IndexOption{
 			Condition: $2.(ast.ExprNode),
 		}
+	}
+
+FullTextParserSpec:
+	Identifier FullTextParserParamListOpt
+	{
+		parserName := $1
+		spec := $2.(*ast.FullTextParserSpec)
+		spec.ParserType = ast.GetFullTextParserTypeBySQLName(parserName)
+		if spec.ParserType == ast.FullTextParserTypeInvalid {
+			spec.ParserName = ast.NewCIStr(parserName)
+		}
+		if errMsg := validateFullTextParserParams(spec); errMsg != "" {
+			yylex.AppendError(yylex.Errorf("%s", errMsg))
+			return 1
+		}
+		$$ = spec
+	}
+
+FullTextParserParamListOpt:
+	{
+		$$ = &ast.FullTextParserSpec{}
+	}
+|	'(' FullTextParserParamList ')'
+	{
+		$$ = $2
+	}
+
+FullTextParserParamList:
+	FullTextParserParam
+	{
+		$$ = $1
+	}
+|	FullTextParserParamList ',' FullTextParserParam
+	{
+		params := $1.(*ast.FullTextParserSpec)
+		if duplicate := mergeFullTextParserParams(params, $3.(*ast.FullTextParserSpec)); duplicate != "" {
+			yylex.AppendError(yylex.Errorf("duplicate fulltext parser parameter %s", duplicate))
+			return 1
+		}
+		$$ = params
+	}
+
+FullTextParserParam:
+	"MIN_GRAM" EqOpt LengthNum
+	{
+		value := $3.(uint64)
+		$$ = &ast.FullTextParserSpec{Ngram: &ast.FullTextNgramParserParams{MinGram: &value}}
+	}
+|	"MAX_GRAM" EqOpt LengthNum
+	{
+		value := $3.(uint64)
+		$$ = &ast.FullTextParserSpec{Ngram: &ast.FullTextNgramParserParams{MaxGram: &value}}
+	}
+|	"GRANULARITY" EqOpt stringLit
+	{
+		value := $3
+		$$ = &ast.FullTextParserSpec{Ngram: &ast.FullTextNgramParserParams{Granularity: &value}}
+	}
+|	"LOWER_CASE" EqOpt Boolean
+	{
+		value := $3.(bool)
+		$$ = &ast.FullTextParserSpec{Ngram: &ast.FullTextNgramParserParams{LowerCase: &value}}
+	}
+|	"DELIMITER" EqOpt stringLit
+	{
+		value := $3
+		$$ = &ast.FullTextParserSpec{PathHierarchy: &ast.FullTextPathHierarchyParserParams{Delimiter: &value}}
 	}
 
 /*
@@ -7848,6 +8072,7 @@ UnReservedKeyword:
 |	"DATETIME"
 |	"DAY"
 |	"DEALLOCATE"
+|	"DELIMITER"
 |	"DO"
 |	"DUPLICATE"
 |	"DYNAMIC"
@@ -7866,6 +8091,7 @@ UnReservedKeyword:
 |	"ESCAPE"
 |	"EVOLVE"
 |	"EXECUTE"
+|	"EXACT" %prec lowerThanStringLitToken
 |	"EXPLORE" %prec lowerThanReplayer
 |	"EXTENDED"
 |	"FIELDS"
@@ -7876,9 +8102,11 @@ UnReservedKeyword:
 |	"FLUSH"
 |	"FOLLOWING"
 |	"FORMAT"
+|	"FTS_MATCH_WORD"
 |	"FULL"
 |	"GENERAL"
 |	"GLOBAL"
+|	"GRANULARITY"
 |	"HASH"
 |	"HELP"
 |	"HOUR"
@@ -7886,6 +8114,7 @@ UnReservedKeyword:
 |	"IMMEDIATE"
 |	"LESS"
 |	"LOCAL"
+|	"LOWER_CASE"
 |	"LAST"
 |	"NAMES"
 |	"NVARCHAR"
@@ -7938,6 +8167,7 @@ UnReservedKeyword:
 |	"WARNINGS"
 |	"YEAR"
 |	"MODE"
+|	"MULTILINGUAL"
 |	"WEEK"
 |	"WEIGHT_STRING"
 |	"ANY"
@@ -7953,11 +8183,14 @@ UnReservedKeyword:
 |	"COMPRESSION"
 |	"KEY_BLOCK_SIZE"
 |	"MASTER"
+|	"MAX_GRAM"
 |	"MATERIALIZED"
 |	"MAX_ROWS"
+|	"MIN_GRAM"
 |	"MIN_ROWS"
 |	"NATIONAL"
 |	"NCHAR"
+|	"NGRAM"
 |	"ROW_FORMAT"
 |	"QUARTER"
 |	"GRANTS"
@@ -7977,6 +8210,8 @@ UnReservedKeyword:
 |	"SQL_CACHE"
 |	"INDEXES"
 |	"PROCESSLIST"
+|	"PATH_HIERARCHY"
+|	"STANDARD"
 |	"SQL_NO_CACHE"
 |	"DISABLE"
 |	"DISABLED"
@@ -8342,7 +8577,6 @@ NotKeywordToken:
 |	"EXPR_PUSHDOWN_BLACKLIST"
 |	"OPT_RULE_BLACKLIST"
 |	"BOUND"
-|	"EXACT" %prec lowerThanStringLitToken
 |	"STALENESS"
 |	"STRONG"
 |	"FLASHBACK"
@@ -9379,7 +9613,15 @@ FunctionCallKeyword:
 	}
 
 FunctionCallNonKeyword:
-	builtinCurTime '(' FuncDatetimePrecListOpt ')'
+	"FTS_MATCH_WORD" '(' Expression ',' FTSQueryFieldList ')'
+	{
+		fields := $5.([]ast.ExprNode)
+		args := make([]ast.ExprNode, 0, len(fields)+1)
+		args = append(args, $3)
+		args = append(args, fields...)
+		$$ = &ast.FuncCallExpr{FnName: ast.NewCIStr(ast.FTSMatchWord), Args: args}
+	}
+|	builtinCurTime '(' FuncDatetimePrecListOpt ')'
 	{
 		$$ = &ast.FuncCallExpr{FnName: ast.NewCIStr($1), Args: $3.([]ast.ExprNode)}
 	}
@@ -9873,6 +10115,48 @@ OptGConcatSeparator:
 |	"SEPARATOR" stringLit
 	{
 		$$ = ast.NewValueExpr($2, parser.charset, parser.collation)
+	}
+
+FTSQueryFieldList:
+	FTSQueryField
+	{
+		$$ = []ast.ExprNode{$1.(ast.ExprNode)}
+	}
+|	FTSQueryFieldList ',' FTSQueryField
+	{
+		$$ = append($1.([]ast.ExprNode), $3.(ast.ExprNode))
+	}
+
+FTSQueryField:
+	ColumnName
+	{
+		$$ = &ast.FTSQueryFieldExpr{Column: &ast.ColumnNameExpr{Name: $1.(*ast.ColumnName)}}
+	}
+|	ColumnName "WITH" "PARSER" FTSQueryParserType
+	{
+		$$ = &ast.FTSQueryFieldExpr{Column: &ast.ColumnNameExpr{Name: $1.(*ast.ColumnName)}, ParserName: $4}
+	}
+
+FTSQueryParserType:
+	"STANDARD"
+	{
+		$$ = "STANDARD"
+	}
+|	"MULTILINGUAL"
+	{
+		$$ = "MULTILINGUAL"
+	}
+|	"NGRAM"
+	{
+		$$ = "NGRAM"
+	}
+|	"EXACT"
+	{
+		$$ = "EXACT"
+	}
+|	"PATH_HIERARCHY"
+	{
+		$$ = "PATH_HIERARCHY"
 	}
 
 FunctionCallGeneric:

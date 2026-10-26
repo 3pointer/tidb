@@ -502,6 +502,12 @@ func (op *DataSource) Hash64(h base.Hasher) {
 	h.HashInt64(int64(op.PhysicalTableID))
 	h.HashInt64(int64(op.PreferStoreType))
 	h.HashBool(op.IsForUpdateRead)
+	if op.FtsPushDown == nil {
+		h.HashByte(base.NilFlag)
+	} else {
+		h.HashByte(base.NotNilFlag)
+		op.FtsPushDown.Hash64(h)
+	}
 }
 
 // Equals implements the Hash64Equals interface, only receive *DataSource pointer.
@@ -556,6 +562,9 @@ func (op *DataSource) Equals(other any) bool {
 		return false
 	}
 	if op.IsForUpdateRead != op2.IsForUpdateRead {
+		return false
+	}
+	if !op.FtsPushDown.Equals(op2.FtsPushDown) {
 		return false
 	}
 	return true

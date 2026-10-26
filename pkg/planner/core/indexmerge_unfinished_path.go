@@ -20,6 +20,7 @@ import (
 
 	"github.com/pingcap/tidb/pkg/expression"
 	"github.com/pingcap/tidb/pkg/kv"
+	"github.com/pingcap/tidb/pkg/meta/model"
 	"github.com/pingcap/tidb/pkg/parser/ast"
 	"github.com/pingcap/tidb/pkg/planner/cardinality"
 	"github.com/pingcap/tidb/pkg/planner/core/cost"
@@ -485,7 +486,7 @@ func buildIntoAccessPath(
 	// comparing the row count just for estimation here.
 	pathsForEstimate := make([]*util.AccessPath, 0, len(allAlternativePaths))
 	for _, oneORBranch := range allAlternativePaths {
-		pathsWithMinRowCount := slices.MinFunc(oneORBranch, cmpAlternatives(ds.SCtx().GetSessionVars()))
+		pathsWithMinRowCount := slices.MinFunc(oneORBranch, cmpAlternatives(ds.SCtx().GetSessionVars(), ds.TableInfo))
 		pathsForEstimate = append(pathsForEstimate, pathsWithMinRowCount...)
 	}
 	possiblePath.CountAfterAccess = estimateCountAfterAccessForIndexMergeOR(ds, pathsForEstimate)
@@ -493,7 +494,7 @@ func buildIntoAccessPath(
 	return possiblePath
 }
 
-func cmpAlternatives(sessionVars *variable.SessionVars) func(lhs, rhs []*util.AccessPath) int {
+func cmpAlternatives(sessionVars *variable.SessionVars, tblInfo *model.TableInfo) func(lhs, rhs []*util.AccessPath) int {
 	allPointOrEmptyRange := func(paths []*util.AccessPath) bool {
 		// Prefer the path with empty range or all point ranges.
 		for _, path := range paths {
@@ -501,11 +502,11 @@ func cmpAlternatives(sessionVars *variable.SessionVars) func(lhs, rhs []*util.Ac
 			if len(path.Ranges) > 0 &&
 				// 2-1. It's not point range on table path.
 				((path.IsTablePath() &&
-					!path.OnlyPointRange(sessionVars.StmtCtx.TypeCtx())) ||
+					!path.OnlyPointRange(sessionVars.StmtCtx.TypeCtx(), tblInfo)) ||
 					// 2-2. It's not point range on unique index.
 					(!path.IsTablePath() &&
 						len(path.Ranges) > 0 &&
-						!(path.OnlyPointRange(sessionVars.StmtCtx.TypeCtx()) && path.Index.Unique))) {
+						!(path.OnlyPointRange(sessionVars.StmtCtx.TypeCtx(), tblInfo) && path.Index.Unique))) {
 				return false
 			}
 		}

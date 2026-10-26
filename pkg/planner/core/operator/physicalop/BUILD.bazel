@@ -134,12 +134,13 @@ go_test(
     timeout = "short",
     srcs = [
         "fragment_test.go",
+        "fts_explain_test.go",
         "physical_batch_point_get_test.go",
         "physical_utils_test.go",
     ],
     embed = [":physicalop"],
     flaky = True,
-    shard_count = 8,
+    shard_count = 10,
     deps = [
         "//pkg/expression",
         "//pkg/expression/aggregation",
@@ -152,6 +153,7 @@ go_test(
         "//pkg/planner/property",
         "//pkg/types",
         "//pkg/util/mock",
+        "@com_github_pingcap_errors//:errors",
         "@com_github_pingcap_tipb//go-tipb",
         "@com_github_stretchr_testify//require",
     ],

@@ -9,6 +9,7 @@ go_library(
         "engine_attribute.go",
         "flags.go",
         "index.go",
+        "index_full_text.go",
         "job.go",
         "job_args.go",
         "masking_policy.go",
@@ -48,6 +49,7 @@ go_test(
     srcs = [
         "bdr_test.go",
         "column_test.go",
+        "index_full_text_test.go",
         "index_test.go",
         "job_args_test.go",
         "job_test.go",

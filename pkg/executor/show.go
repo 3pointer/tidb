@@ -1087,6 +1087,42 @@ func ConstructResultOfShowCreateTable(ctx sessionctx.Context, tableInfo *model.T
 	return constructResultOfShowCreateTable(ctx, nil, tableInfo, allocators, buf)
 }
 
+func formatFullTextIndexField(field model.FullTextIndexFieldInfo) string {
+	parserName := field.IndexFieldOption.AnalyzerType.SQLName()
+	switch field.IndexFieldOption.AnalyzerType {
+	case model.FullTextParserTypeNgramV1:
+		minGram := model.DefaultFullTextNgramMinGram
+		maxGram := model.DefaultFullTextNgramMaxGram
+		granularity := model.DefaultFullTextNgramGranularity
+		lowerCase := model.DefaultFullTextNgramLowerCase
+		if field.IndexFieldOption.Ngram != nil {
+			minGram = field.IndexFieldOption.Ngram.MinGram
+			maxGram = field.IndexFieldOption.Ngram.MaxGram
+			granularity = field.IndexFieldOption.Ngram.Granularity
+			lowerCase = field.IndexFieldOption.Ngram.LowerCase
+		}
+		result := fmt.Sprintf(
+			"%s(MIN_GRAM = %d, MAX_GRAM = %d, GRANULARITY = '%s'",
+			parserName,
+			minGram,
+			maxGram,
+			strings.ToLower(string(granularity)),
+		)
+		if !lowerCase {
+			result += ", LOWER_CASE = FALSE"
+		}
+		return result + ")"
+	case model.FullTextParserTypePathHierarchyV1:
+		delimiter := model.DefaultFullTextPathHierarchyDelimiter
+		if field.IndexFieldOption.PathHierarchy != nil {
+			delimiter = field.IndexFieldOption.PathHierarchy.Delimiter
+		}
+		return fmt.Sprintf("%s(DELIMITER = '%s')", parserName, parserformat.OutputFormat(delimiter))
+	default:
+		return parserName
+	}
+}
+
 func constructResultOfShowCreateTable(ctx sessionctx.Context, dbName *ast.CIStr, tableInfo *model.TableInfo, allocators autoid.Allocators, buf *bytes.Buffer) (err error) {
 	if tableInfo.IsView() {
 		fetchShowCreateTable4View(ctx, tableInfo, buf)
@@ -1277,6 +1313,7 @@ func constructResultOfShowCreateTable(ctx sessionctx.Context, dbName *ast.CIStr,
 			fmt.Fprintf(buf, "  KEY %s ", stringutil.Escape(idxInfo.Name.O, sqlMode))
 		}
 
+		fullTextColumnSyntax := idxInfo.FullTextInfo != nil && idxInfo.FullTextInfo.ParserType == ""
 		cols := make([]string, 0, len(idxInfo.Columns))
 		var colInfo string
 		for _, c := range idxInfo.Columns {
@@ -1287,6 +1324,15 @@ func constructResultOfShowCreateTable(ctx sessionctx.Context, dbName *ast.CIStr,
 				if c.Length != types.UnspecifiedLength {
 					colInfo = fmt.Sprintf("%s(%s)", colInfo, strconv.Itoa(c.Length))
 				}
+			}
+			if fullTextColumnSyntax {
+				columnID := tableInfo.Columns[c.Offset].ID
+				indexFields := idxInfo.FullTextInfo.IndexFieldsForColumn(columnID)
+				parserSpecs := make([]string, 0, len(indexFields))
+				for _, indexField := range indexFields {
+					parserSpecs = append(parserSpecs, formatFullTextIndexField(indexField))
+				}
+				colInfo = fmt.Sprintf("%s WITH (%s)", colInfo, strings.Join(parserSpecs, ", "))
 			}
 			cols = append(cols, colInfo)
 		}
@@ -1300,8 +1346,14 @@ func constructResultOfShowCreateTable(ctx sessionctx.Context, dbName *ast.CIStr,
 		if idxInfo.InvertedInfo != nil {
 			fmt.Fprintf(buf, " USING INVERTED")
 		}
-		if idxInfo.FullTextInfo != nil {
-			fmt.Fprintf(buf, " WITH PARSER %s", idxInfo.FullTextInfo.ParserType.SQLName())
+		if idxInfo.FullTextInfo != nil && !fullTextColumnSyntax {
+			var columnID int64
+			if len(idxInfo.Columns) > 0 {
+				columnID = tableInfo.Columns[idxInfo.Columns[0].Offset].ID
+			}
+			if indexField, ok := idxInfo.FullTextInfo.PrimaryIndexFieldForColumn(columnID); ok {
+				fmt.Fprintf(buf, " WITH PARSER %s", formatFullTextIndexField(*indexField))
+			}
 		}
 		if idxInfo.ConditionExprString != "" {
 			fmt.Fprintf(buf, " WHERE %s", idxInfo.ConditionExprString)

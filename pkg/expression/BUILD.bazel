@@ -207,6 +207,7 @@ go_test(
         "evaluator_test.go",
         "expr_to_pb_test.go",
         "expression_test.go",
+        "fts_helper_test.go",
         "fts_to_like_test.go",
         "function_traits_test.go",
         "grouping_sets_test.go",

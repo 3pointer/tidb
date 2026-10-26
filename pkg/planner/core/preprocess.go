@@ -1264,6 +1264,9 @@ func checkIndexOptions(isColumnar bool, indexOptions *ast.IndexOption) error {
 		case ast.IndexTypeVector, ast.IndexTypeInverted:
 			// Accepted
 		case ast.IndexTypeFulltext:
+			if spec := indexOptions.FullTextParser; spec != nil && spec.ParserType == model.FullTextParserTypeInvalid {
+				return dbterror.ErrUnsupportedIndexType.FastGen("Unsupported parser '%s'", spec.ParserName.O)
+			}
 			if indexOptions.ParserName.L != "" && model.GetFullTextParserTypeBySQLName(indexOptions.ParserName.L) == model.FullTextParserTypeInvalid {
 				return dbterror.ErrUnsupportedIndexType.FastGen("Unsupported parser '%s'", indexOptions.ParserName.O)
 			}
@@ -1303,8 +1306,13 @@ func checkIndexSpecs(indexOptions *ast.IndexOption, partSpecs []*ast.IndexPartSp
 			return dbterror.ErrUnsupportedAddColumnarIndex.FastGen("COLUMNAR INDEX of INVERTED type must specify one column name")
 		}
 	case ast.IndexTypeFulltext:
-		if len(partSpecs) != 1 || partSpecs[0].Column == nil {
-			return dbterror.ErrUnsupportedAddColumnarIndex.FastGen("FULLTEXT index must specify one column name")
+		if len(partSpecs) == 0 {
+			return dbterror.ErrUnsupportedAddColumnarIndex.FastGen("FULLTEXT index must specify at least one column name")
+		}
+		for _, part := range partSpecs {
+			if part.Column == nil {
+				return dbterror.ErrUnsupportedAddColumnarIndex.FastGen("FULLTEXT index must specify column names")
+			}
 		}
 	}
 	return nil
@@ -1319,6 +1327,9 @@ func (p *preprocessor) checkCreateIndexGrammar(stmt *ast.CreateIndexStmt) {
 	if stmt.IndexName == "" {
 		p.err = dbterror.ErrWrongNameForIndex.GenWithStackByArgs(stmt.IndexName)
 		return
+	}
+	if stmt.KeyType == ast.IndexKeyTypeFulltext && len(stmt.FullTextIndexPartSpecifications) > 0 {
+		stmt.IndexPartSpecifications = ast.FullTextIndexPartsToIndexParts(stmt.FullTextIndexPartSpecifications)
 	}
 	p.err = checkIndexInfo(stmt.IndexName, stmt.IndexPartSpecifications)
 	if p.err != nil {
@@ -1362,6 +1373,9 @@ func (p *preprocessor) checkConstraintGrammar(stmt *ast.Constraint) {
 		stmt.Option.Tp = ast.IndexTypeVector
 	}
 	if stmt.Tp == ast.ConstraintFulltext {
+		if len(stmt.FullTextIndexPartSpecifications) > 0 {
+			stmt.Keys = ast.FullTextIndexPartsToIndexParts(stmt.FullTextIndexPartSpecifications)
+		}
 		if stmt.Option.Tp != ast.IndexTypeInvalid {
 			p.err = dbterror.ErrUnsupportedIndexType.FastGen("'USING %s' is not supported for FULLTEXT INDEX", stmt.Option.Tp)
 			return

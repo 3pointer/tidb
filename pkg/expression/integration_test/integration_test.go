@@ -135,15 +135,18 @@ import (
 // 	tk.MustContainErrMsg("explain select * from t where fts_match_word('hello', title)", "Full text search can be only executed in a columnar storage")
 // }
 
-func skipIfNotStarterForFTS(t *testing.T) {
-	if !deploymode.IsStarter() {
-		t.Skip("full text search is only supported in starter deployment mode")
+func enableStarterDeployModeForFTSTest(t *testing.T) {
+	t.Helper()
+	if !kerneltype.IsNextGen() {
+		t.Skip("full text search requires nextgen Starter deployment mode")
 	}
+	originalMode := deploymode.Get()
+	require.NoError(t, deploymode.Set(deploymode.Starter))
+	t.Cleanup(func() { require.NoError(t, deploymode.Set(originalMode)) })
 }
 
 func TestFTSParser(t *testing.T) {
-	skipIfNotStarterForFTS(t)
-
+	enableStarterDeployModeForFTSTest(t)
 	store := testkit.CreateMockStoreWithSchemaLease(t, 1*time.Second, mockstore.WithMockTiFlash(2))
 	tk := testkit.NewTestKit(t, store)
 	tk.MustExec("use test")
@@ -188,12 +191,20 @@ func TestFTSParser(t *testing.T) {
 	))
 	tk.MustExec("drop table tx")
 
+	tk.MustExec("create table tx (a TEXT, FULLTEXT (a) WITH PARSER `multilingual`)")
+	tk.MustQuery("show create table tx").Check(testkit.Rows(
+		"tx CREATE TABLE `tx` (\n" +
+			"  `a` text DEFAULT NULL,\n" +
+			"  FULLTEXT INDEX `a`(`a`) WITH PARSER MULTILINGUAL\n" +
+			") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
+	))
+	tk.MustExec("drop table tx")
+
 	tk.MustContainErrMsg("create table tx (a TEXT, FULLTEXT (a) WITH PARSER abc)", "Unsupported parser 'abc'")
 }
 
 func TestFTSSyntax(t *testing.T) {
-	skipIfNotStarterForFTS(t)
-
+	enableStarterDeployModeForFTSTest(t)
 	store := testkit.CreateMockStoreWithSchemaLease(t, 1*time.Second, mockstore.WithMockTiFlash(2))
 	tk := testkit.NewTestKit(t, store)
 	tk.MustExec("use test")
@@ -211,17 +222,25 @@ func TestFTSSyntax(t *testing.T) {
 		require.NoError(t, failpoint.Disable("github.com/pingcap/tidb/pkg/ddl/MockCheckColumnarIndexProcess"))
 	}()
 
-	tk.MustExec("create table t(title TEXT, body TEXT, FULLTEXT INDEX(title))")
+	tk.MustExec("create table t(title TEXT, body TEXT, FULLTEXT INDEX(title WITH (standard), body WITH (multilingual, exact)))")
 	tbl, _ := domain.GetDomain(tk.Session()).InfoSchema().TableByName(context.Background(), ast.NewCIStr("test"), ast.NewCIStr("t"))
 	tbl.Meta().TiFlashReplica = &model.TiFlashReplicaInfo{
 		Count:     1,
 		Available: true,
 	}
 
+	// Parser-less queries use the first parser of each column: STANDARD for title,
+	// MULTILINGUAL for body. Exact equality is the supported filter on EXACT fields.
 	tk.MustQuery("select * from t where fts_match_word('hello', title)")
+	tk.MustQuery("select * from t where fts_match_word('hello', body)")
+	tk.MustQuery("explain select * from t where fts_match_word('hello', title, body)")
+	tk.MustQuery("explain select * from t where fts_match_word('hello', title WITH PARSER STANDARD, body)")
+	tk.MustQuery("explain select * from t where fts_match_word('hello', body WITH PARSER MULTILINGUAL)")
 	tk.MustQuery("select * from t where fts_match_word('hello', title) AND body = ''")
-	// tk.MustContainErrMsg("select * from t where (fts_match_word('hello', title)) > 0", "Currently 'FTS_MATCH_WORD()' must be used alone")
-	// tk.MustContainErrMsg("select (fts_match_word('hello', title)) AS score from t where fts_match_word('hello', title)", "Currently 'FTS_MATCH_WORD()' cannot be used in SELECT fields")
+
+	tk.MustContainErrMsg("select * from t where fts_match_word('hello', body WITH PARSER EXACT)", "FTS_MATCH_WORD does not support fields using the EXACT parser")
+	tk.MustContainErrMsg("explain select * from t where fts_match_word('hello', title, body WITH PARSER EXACT)", "FTS_MATCH_WORD does not support fields using the EXACT parser")
+	tk.MustContainErrMsg("select * from t where (fts_match_word('hello', title)) > 0", "matching current TiFlash full-text index path")
 	tk.MustContainErrMsg("select * from t where match() against ('hello')", `You have an error in your SQL syntax`)
 	// Test MATCH...AGAINST with alternative plans - LIKE fallback competes on cost
 	tk.MustExec("set @@tidb_opt_enable_alternative_logical_plans=ON")
@@ -229,12 +248,10 @@ func TestFTSSyntax(t *testing.T) {
 	tk.MustExec("set @@tidb_opt_enable_alternative_logical_plans=OFF")
 	tk.MustContainErrMsg("select * from t where fts_match_word(title, body)", `match against a non-constant string`)
 	tk.MustContainErrMsg("select * from t where fts_match_word(45.67, body)", `match against a non-constant string`)
-	tk.MustContainErrMsg("select * from t where fts_match_word('hello', title, body)", `Incorrect parameter count in the call to native function`)
 }
 
 func TestFTSIndexSyntax(t *testing.T) {
-	skipIfNotStarterForFTS(t)
-
+	enableStarterDeployModeForFTSTest(t)
 	store := testkit.CreateMockStoreWithSchemaLease(t, 1*time.Second, mockstore.WithMockTiFlash(2))
 	tk := testkit.NewTestKit(t, store)
 	tk.MustExec("use test")
@@ -252,12 +269,12 @@ func TestFTSIndexSyntax(t *testing.T) {
 		require.NoError(t, failpoint.Disable("github.com/pingcap/tidb/pkg/ddl/MockCheckColumnarIndexProcess"))
 	}()
 
-	tk.MustContainErrMsg("create table t(title TEXT, body TEXT, FULLTEXT KEY (`title`, `body`))", `FULLTEXT index must specify one column name`)
-	tk.MustContainErrMsg("create table t(title TEXT, body TEXT, FULLTEXT KEY ((`title`)))", `FULLTEXT index must specify one column name`)
-	tk.MustContainErrMsg("create table t(title TEXT, body TEXT, FULLTEXT KEY (title(5)))", `FULLTEXT index does not support prefix length`)
-	tk.MustContainErrMsg("create table t(title TEXT, body TEXT, FULLTEXT KEY (title DESC))", `FULLTEXT index does not support DESC order`)
-	tk.MustContainErrMsg("create table t(title TEXT, body TEXT, c INT, FULLTEXT KEY (c))", `only support string type`)
-	tk.MustContainErrMsg("create table t1(title TEXT, body TEXT, FULLTEXT KEY (title) WITH PARSER ngramx)", `Unsupported parser`)
+	tk.MustContainErrMsg("create table t(title TEXT, body TEXT, FULLTEXT KEY ((`title`)))", `You have an error in your SQL syntax`)
+	tk.MustContainErrMsg("create table t(title TEXT, body TEXT, FULLTEXT KEY (title(5)))", `You have an error in your SQL syntax`)
+	tk.MustContainErrMsg("create table t(title TEXT, body TEXT, FULLTEXT KEY (title DESC))", `You have an error in your SQL syntax`)
+	tk.MustContainErrMsg("create table t(title TEXT, body TEXT, FULLTEXT KEY (title ASC))", `You have an error in your SQL syntax`)
+	tk.MustContainErrMsg("create table t(title TEXT, body TEXT, c INT, FULLTEXT KEY (c))", `fulltext parser STANDARD can only be used on a non-binary string-like column`)
+	tk.MustContainErrMsg("create table t1(title TEXT, body TEXT, FULLTEXT KEY (title) WITH PARSER ngramx)", `Unsupported parser 'ngramx'`)
 
 	tk.MustExec("create table t1(title TEXT, body TEXT, FULLTEXT KEY (title))")
 	tk.MustQuery("show create table t1").Check(testkit.Rows("t1 CREATE TABLE `t1` (\n  `title` text DEFAULT NULL,\n  `body` text DEFAULT NULL,\n  FULLTEXT INDEX `title`(`title`) WITH PARSER STANDARD\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"))
@@ -267,12 +284,23 @@ func TestFTSIndexSyntax(t *testing.T) {
 	tk.MustQuery("show create table t3").Check(testkit.Rows("t3 CREATE TABLE `t3` (\n  `title` text DEFAULT NULL,\n  `body` text DEFAULT NULL,\n  FULLTEXT INDEX `idx`(`title`) WITH PARSER STANDARD\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"))
 	tk.MustExec("create table t4(title TEXT, body TEXT, FULLTEXT KEY `idx` (`title`))")
 	tk.MustQuery("show create table t4").Check(testkit.Rows("t4 CREATE TABLE `t4` (\n  `title` text DEFAULT NULL,\n  `body` text DEFAULT NULL,\n  FULLTEXT INDEX `idx`(`title`) WITH PARSER STANDARD\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"))
-	tk.MustExec("create table t5(title TEXT, body TEXT, FULLTEXT KEY `idx` (title ASC))")
-	tk.MustQuery("show create table t5").Check(testkit.Rows("t5 CREATE TABLE `t5` (\n  `title` text DEFAULT NULL,\n  `body` text DEFAULT NULL,\n  FULLTEXT INDEX `idx`(`title`) WITH PARSER STANDARD\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"))
-	tk.MustExec("create table t6(title TEXT, body TEXT, FULLTEXT KEY `idx` (title ASC) WITH PARSER standard)")
-	tk.MustQuery("show create table t6").Check(testkit.Rows("t6 CREATE TABLE `t6` (\n  `title` text DEFAULT NULL,\n  `body` text DEFAULT NULL,\n  FULLTEXT INDEX `idx`(`title`) WITH PARSER STANDARD\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"))
+	tk.MustExec("create table t5(title TEXT, body TEXT, FULLTEXT KEY `idx` (title, body) WITH PARSER multilingual)")
+	tk.MustQuery("show create table t5").Check(testkit.Rows("t5 CREATE TABLE `t5` (\n  `title` text DEFAULT NULL,\n  `body` text DEFAULT NULL,\n  FULLTEXT INDEX `idx`(`title`,`body`) WITH PARSER MULTILINGUAL\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"))
+	tk.MustExec("create table t6(title TEXT, body TEXT, FULLTEXT KEY `idx` (title WITH (multilingual, ngram(min_gram=3, max_gram=4)), body WITH (exact, path_hierarchy(delimiter='/'))))")
+	tk.MustQuery("show create table t6").Check(testkit.Rows("t6 CREATE TABLE `t6` (\n  `title` text DEFAULT NULL,\n  `body` text DEFAULT NULL,\n  FULLTEXT INDEX `idx`(`title` WITH (MULTILINGUAL, NGRAM(MIN_GRAM = 3, MAX_GRAM = 4, GRANULARITY = 'word')),`body` WITH (EXACT, PATH_HIERARCHY(DELIMITER = '/')))\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"))
+	t6, err := domain.GetDomain(tk.Session()).InfoSchema().TableByName(context.Background(), ast.NewCIStr("test"), ast.NewCIStr("t6"))
+	require.NoError(t, err)
+	ftsInfo := t6.Meta().Indices[0].FullTextInfo
+	require.Empty(t, ftsInfo.ParserType)
+	require.Len(t, ftsInfo.IndexFields, 4)
+	require.Equal(t, model.FullTextParserTypeMultilingualV1, ftsInfo.IndexFields[0].IndexFieldOption.AnalyzerType)
+	require.Equal(t, model.FullTextParserTypeNgramV1, ftsInfo.IndexFields[1].IndexFieldOption.AnalyzerType)
+	require.Equal(t, model.FullTextParserTypeExactV1, ftsInfo.IndexFields[2].IndexFieldOption.AnalyzerType)
+	require.Equal(t, model.FullTextParserTypePathHierarchyV1, ftsInfo.IndexFields[3].IndexFieldOption.AnalyzerType)
+	tk.MustExec("create table t7(title TEXT, body TEXT, FULLTEXT KEY `idx` (title) WITH PARSER ngram (MIN_GRAM = 2, MAX_GRAM = 2, LOWER_CASE = false))")
+	tk.MustQuery("show create table t7").Check(testkit.Rows("t7 CREATE TABLE `t7` (\n  `title` text DEFAULT NULL,\n  `body` text DEFAULT NULL,\n  FULLTEXT INDEX `idx`(`title`) WITH PARSER NGRAM(MIN_GRAM = 2, MAX_GRAM = 2, GRANULARITY = 'word', LOWER_CASE = FALSE)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"))
 
-	tk.MustExec("drop table t1, t2, t3, t4, t5, t6")
+	tk.MustExec("drop table t1, t2, t3, t4, t5, t6, t7")
 	tk.MustExec("create table t1(title TEXT, body TEXT)")
 	tk.MustContainErrMsg("alter table t1 add FULLTEXT INDEX (body)", "columnar replica must exist to create")
 	tk.MustExec("alter table t1 set tiflash replica 1")

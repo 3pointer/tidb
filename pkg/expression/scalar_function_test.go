@@ -15,6 +15,7 @@
 package expression
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/pingcap/tidb/pkg/parser/ast"
@@ -257,4 +258,105 @@ func TestForbidUnixTimestampPushdown(t *testing.T) {
 		Function: bt,
 	}
 	require.False(t, scalarExprSupportedByTiKV(ctx, sf))
+}
+
+func TestFTSMatchWordOptionsBelongToBuiltinSignature(t *testing.T) {
+	enableStarterDeployModeForFTSTest(t)
+	ctx := mock.NewContext()
+	column := &Column{
+		ID:       11,
+		UniqueID: 21,
+		RetType:  types.NewFieldType(mysql.TypeVarchar),
+	}
+	newMatchWord := func(parserName string) *ScalarFunction {
+		t.Helper()
+		expr := NewFunctionInternal(
+			ctx,
+			ast.FTSMatchWord,
+			types.NewFieldType(mysql.TypeDouble),
+			NewStrConst("hello"),
+			column,
+		).(*ScalarFunction)
+		SetFTSMatchWordOptions(expr, &FTSMatchWordOptions{
+			Fields: []FTSMatchWordFieldOption{{ParserName: parserName}},
+		})
+		return expr
+	}
+
+	standard := newMatchWord("STANDARD")
+	ngram := newMatchWord("NGRAM")
+	require.False(t, standard.Equal(ctx, ngram))
+	require.False(t, standard.Equals(ngram))
+	require.NotEqual(t, standard.HashCode(), ngram.HashCode())
+	require.NotEqual(t, standard.CanonicalHashCode(), ngram.CanonicalHashCode())
+	hasher := base.NewHashEqualer()
+	standard.Hash64(hasher)
+	standardHash64 := hasher.Sum64()
+	hasher.Reset()
+	ngram.Hash64(hasher)
+	require.NotEqual(t, standardHash64, hasher.Sum64())
+
+	clone := standard.Clone().(*ScalarFunction)
+	require.True(t, standard.Equal(ctx, clone))
+	require.Equal(t, standard.HashCode(), clone.HashCode())
+	require.Equal(t, "STANDARD", GetFTSMatchWordOptions(clone).Fields[0].ParserName)
+	SetFTSMatchWordOptions(clone, &FTSMatchWordOptions{
+		Fields: []FTSMatchWordFieldOption{{ParserName: "NGRAM"}},
+	})
+	require.Equal(t, "STANDARD", GetFTSMatchWordOptions(standard).Fields[0].ParserName)
+	require.Equal(t, "NGRAM", GetFTSMatchWordOptions(clone).Fields[0].ParserName)
+
+	persistedName := newMatchWord("STANDARD_V1")
+	require.True(t, standard.Equal(ctx, persistedName))
+	require.Equal(t, standard.HashCode(), persistedName.HashCode())
+	hasher.Reset()
+	persistedName.Hash64(hasher)
+	require.Equal(t, standardHash64, hasher.Sum64())
+
+	override := standard.Clone().(*ScalarFunction)
+	overrideOptions := GetFTSMatchWordOptions(override)
+	overrideOptions.Query = int64(42)
+	SetFTSMatchWordOptions(override, overrideOptions)
+	require.False(t, standard.Equal(ctx, override))
+	require.False(t, standard.Equals(override))
+	require.NotEqual(t, standard.HashCode(), override.HashCode())
+	require.NotEqual(t, standard.CanonicalHashCode(), override.CanonicalHashCode())
+	overrideInfo := InterpretFullTextSearchExpr(override)
+	require.NotNil(t, overrideInfo)
+	require.Equal(t, FtsScoreModeInherit, overrideInfo.Clause.ScoreMode)
+	require.Equal(t, int64(42), overrideInfo.Clause.Query)
+
+	replacement := column.Clone().(*Column)
+	replacement.UniqueID = 22
+	substituted := ColumnSubstitute(ctx, standard, NewSchema(column), []Expression{replacement})
+	info := InterpretFullTextSearchExpr(substituted)
+	require.NotNil(t, info)
+	require.Equal(t, replacement.UniqueID, info.Columns[0].UniqueID)
+	require.Equal(t, "STANDARD", info.Clause.Fields[0].IndexField)
+}
+
+func TestMatchFTSQueryPBAndMarkFiltersAcceptsMatchWordRoot(t *testing.T) {
+	newMatch := func(query string) *tipb.Expr {
+		clause, err := json.Marshal(QueryClause{
+			Version:   FTSQueryClauseVersion,
+			ScoreMode: FtsScoreModeInherit,
+			Query:     query,
+			Fields:    []QueryField{{ColID: 1, IndexField: "STANDARD_V1"}},
+		})
+		require.NoError(t, err)
+		return &tipb.Expr{
+			Tp:  tipb.ExprType_ScalarFunc,
+			Sig: tipb.ScalarFuncSig_FTSMatchWord,
+			Val: clause,
+		}
+	}
+
+	root := newMatch("foo")
+	matchCount, ok := matchFTSQueryPBAndMarkFilters(root, newMatch("foo"))
+	require.True(t, ok)
+	require.Equal(t, 1, matchCount)
+
+	matchCount, ok = matchFTSQueryPBAndMarkFilters(root, newMatch("bar"))
+	require.True(t, ok)
+	require.Zero(t, matchCount)
 }

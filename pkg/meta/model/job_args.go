@@ -1518,12 +1518,13 @@ const (
 //	Rename index: IndexName
 type IndexArg struct {
 	// Global is never used, we only use Global in IndexOption. Can be deprecated later.
-	Global                  bool                          `json:"-"`
-	Unique                  bool                          `json:"unique,omitempty"`
-	IndexName               ast.CIStr                     `json:"index_name,omitempty"`
-	IndexPartSpecifications []*ast.IndexPartSpecification `json:"index_part_specifications"`
-	IndexOption             *ast.IndexOption              `json:"index_option,omitempty"`
-	HiddenCols              []*ColumnInfo                 `json:"hidden_cols,omitempty"`
+	Global                          bool                                  `json:"-"`
+	Unique                          bool                                  `json:"unique,omitempty"`
+	IndexName                       ast.CIStr                             `json:"index_name,omitempty"`
+	IndexPartSpecifications         []*ast.IndexPartSpecification         `json:"index_part_specifications"`
+	FullTextIndexPartSpecifications []*ast.FullTextIndexPartSpecification `json:"fulltext_index_part_specifications,omitempty"`
+	IndexOption                     *ast.IndexOption                      `json:"index_option,omitempty"`
+	HiddenCols                      []*ColumnInfo                         `json:"hidden_cols,omitempty"`
 
 	// For vector index
 	FuncExpr string `json:"func_expr,omitempty"`
